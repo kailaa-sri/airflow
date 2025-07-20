@@ -20,13 +20,22 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from functools import wraps
-from typing import Callable, TypeVar, cast
+from typing import TypeVar, cast
 
 import google
 import google.auth.transport.requests
 import google.oauth2.id_token
-from flask import Response, current_app, request as flask_request  # type: ignore
+
+try:
+    from flask import Response, current_app, request as flask_request
+except ImportError:
+    raise ImportError(
+        "Google requires FAB provider to be installed in order to use this auth backend. "
+        "Please install the FAB provider by running: "
+        "pip install apache-airflow-providers-google[fab]"
+    )
 from google.auth import exceptions
 from google.auth.transport.requests import AuthorizedSession
 from google.oauth2 import service_account
@@ -113,7 +122,7 @@ def _lookup_user(user_email: str):
 
 
 def _set_current_user(user):
-    current_app.appbuilder.sm.lm._update_request_context_with_user(user=user)  # type: ignore[attr-defined]
+    current_app.appbuilder.sm.lm._update_request_context_with_user(user=user)
 
 
 T = TypeVar("T", bound=Callable)
@@ -146,4 +155,4 @@ def requires_authentication(function: T):
 
         return function(*args, **kwargs)
 
-    return cast(T, decorated)
+    return cast("T", decorated)

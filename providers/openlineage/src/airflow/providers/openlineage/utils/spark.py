@@ -24,6 +24,8 @@ from airflow.providers.openlineage.plugins.listener import get_openlineage_liste
 from airflow.providers.openlineage.plugins.macros import (
     lineage_job_name,
     lineage_job_namespace,
+    lineage_root_job_name,
+    lineage_root_run_id,
     lineage_run_id,
 )
 
@@ -48,6 +50,9 @@ def _get_parent_job_information_as_spark_properties(context: Context) -> dict:
         "spark.openlineage.parentJobNamespace": lineage_job_namespace(),
         "spark.openlineage.parentJobName": lineage_job_name(ti),  # type: ignore[arg-type]
         "spark.openlineage.parentRunId": lineage_run_id(ti),  # type: ignore[arg-type]
+        "spark.openlineage.rootParentRunId": lineage_root_run_id(ti),  # type: ignore[arg-type]
+        "spark.openlineage.rootParentJobName": lineage_root_job_name(ti),  # type: ignore[arg-type]
+        "spark.openlineage.rootParentJobNamespace": lineage_job_namespace(),
     }
 
 
@@ -60,7 +65,7 @@ def _get_transport_information_as_spark_properties() -> dict:
             "url": tp.url,
             "endpoint": tp.endpoint,
             "timeoutInMillis": str(
-                int(tp.timeout * 1000)  # convert to milliseconds, as required by Spark integration
+                int(tp.timeout) * 1000  # convert to milliseconds, as required by Spark integration
             ),
         }
         if hasattr(tp, "compression") and tp.compression:
@@ -111,7 +116,7 @@ def _get_transport_information_as_spark_properties() -> dict:
             props = _format_transport(props, http_transport, name)
         return props
 
-    elif transport.kind == "http":
+    if transport.kind == "http":
         return _format_transport({}, _get_transport_information(transport), None)
 
     log.info(

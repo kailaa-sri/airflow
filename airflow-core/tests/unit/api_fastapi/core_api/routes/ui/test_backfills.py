@@ -63,7 +63,7 @@ class TestBackfillEndpoint:
             dag_model = DagModel(
                 dag_id=f"{dag_id_prefix}_{num}",
                 fileloc=f"/tmp/dag_{num}.py",
-                is_active=True,
+                is_stale=False,
                 timetable_summary="0 0 * * *",
                 is_paused=is_paused,
             )
@@ -104,6 +104,7 @@ class TestListBackfills(TestBackfillEndpoint):
             "backfill1": {
                 "completed_at": from_datetime_to_zulu(completed_at),
                 "created_at": mock.ANY,
+                "dag_display_name": "TEST_DAG_1",
                 "dag_id": "TEST_DAG_1",
                 "dag_run_conf": {},
                 "from_date": from_datetime_to_zulu(from_date),
@@ -117,6 +118,7 @@ class TestListBackfills(TestBackfillEndpoint):
             "backfill2": {
                 "completed_at": None,
                 "created_at": mock.ANY,
+                "dag_display_name": "TEST_DAG_2",
                 "dag_id": "TEST_DAG_2",
                 "dag_run_conf": {},
                 "from_date": from_datetime_to_zulu(from_date),
@@ -130,6 +132,7 @@ class TestListBackfills(TestBackfillEndpoint):
             "backfill3": {
                 "completed_at": None,
                 "created_at": mock.ANY,
+                "dag_display_name": "TEST_DAG_3",
                 "dag_id": "TEST_DAG_3",
                 "dag_run_conf": {},
                 "from_date": from_datetime_to_zulu(from_date),
@@ -144,7 +147,7 @@ class TestListBackfills(TestBackfillEndpoint):
         expected_response = []
         for backfill in response_params:
             expected_response.append(backfill_responses[backfill])
-        response = test_client.get("/ui/backfills", params=test_params)
+        response = test_client.get("/backfills", params=test_params)
         assert response.status_code == 200
         assert response.json() == {
             "backfills": expected_response,
@@ -152,9 +155,9 @@ class TestListBackfills(TestBackfillEndpoint):
         }
 
     def test_should_response_401(self, unauthenticated_test_client):
-        response = unauthenticated_test_client.get("/ui/backfills", params={})
+        response = unauthenticated_test_client.get("/backfills", params={})
         assert response.status_code == 401
 
     def test_should_response_403(self, unauthorized_test_client):
-        response = unauthorized_test_client.get("/ui/backfills", params={})
+        response = unauthorized_test_client.get("/backfills", params={})
         assert response.status_code == 403

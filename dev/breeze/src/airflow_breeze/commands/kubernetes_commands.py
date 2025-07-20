@@ -23,6 +23,7 @@ import shutil
 import sys
 import tempfile
 from copy import deepcopy
+from itertools import chain
 from pathlib import Path
 from shlex import quote
 
@@ -56,20 +57,22 @@ from airflow_breeze.utils.custom_param_types import CacheableChoice, CacheableDe
 from airflow_breeze.utils.kubernetes_utils import (
     CHART_PATH,
     K8S_CLUSTERS_PATH,
+    KUBERNETES_TEST_PATH,
     SCRIPTS_CI_KUBERNETES_PATH,
     KubernetesPythonVersion,
-    create_virtualenv,
     get_config_folder,
     get_k8s_env,
     get_kind_cluster_config_path,
     get_kind_cluster_name,
     get_kubeconfig_file,
     get_kubectl_cluster_name,
+    get_kubernetes_port_numbers,
     get_kubernetes_python_combos,
     make_sure_kubernetes_tools_are_installed,
     print_cluster_urls,
     run_command_with_k8s_env,
     set_random_cluster_ports,
+    sync_virtualenv,
 )
 from airflow_breeze.utils.parallel import (
     DockerBuildxProgressMatcher,
@@ -215,14 +218,14 @@ K8S_CLUSTER_CREATE_PROGRESS_REGEXP = r".*airflow-python-[0-9.]+-v[0-9.].*|.*Conn
 K8S_UPLOAD_PROGRESS_REGEXP = r".*airflow-python-[0-9.]+-v[0-9.].*"
 K8S_CONFIGURE_CLUSTER_PROGRESS_REGEXP = r".*airflow-python-[0-9.]+-v[0-9.].*"
 K8S_DEPLOY_PROGRESS_REGEXP = r".*airflow-python-[0-9.]+-v[0-9.].*"
-K8S_TEST_PROGRESS_REGEXP = r".*airflow-python-[0-9.]+-v[0-9.].*|^kubernetes_tests/.*"
-PREVIOUS_LINE_K8S_TEST_REGEXP = r"^kubernetes_tests/.*"
+K8S_TEST_PROGRESS_REGEXP = r".*airflow-python-[0-9.]+-v[0-9.].*|^kubernetes-tests/.*"
+PREVIOUS_LINE_K8S_TEST_REGEXP = r"^kubernetes-tests/.*"
 
 COMPLETE_TEST_REGEXP = (
     r"\s*#(\d*) |"
     r".*airflow-python-[0-9.]+-v[0-9.].*|"
     r".*Connecting to localhost.*|"
-    r"^kubernetes_tests/.*|"
+    r"^kubernetes-tests/.*|"
     r".*Error during running tests.*|"
     r".*Successfully run tests.*"
 )
@@ -233,7 +236,7 @@ COMPLETE_TEST_REGEXP = (
 @option_verbose
 @option_dry_run
 def setup_env(force_venv_setup: bool):
-    result = create_virtualenv(force_venv_setup=force_venv_setup)
+    result = sync_virtualenv(force_venv_setup=force_venv_setup)
     if result.returncode != 0:
         sys.exit(1)
     make_sure_kubernetes_tools_are_installed()
@@ -277,6 +280,8 @@ def _create_cluster(
         )
         if result.returncode == 0:
             print_cluster_urls(python=python, kubernetes_version=kubernetes_version, output=output)
+            kubeconfig_file = get_kubeconfig_file(python=python, kubernetes_version=kubernetes_version)
+            (KUBERNETES_TEST_PATH / ".env").write_text(f"KUBECONFIG={quote(kubeconfig_file.as_posix())}\n")
             get_console(output=output).print(f"[success]KinD cluster {cluster_name} created!\n")
             get_console(output=output).print(
                 "\n[warning]NEXT STEP:[/][info] You might now configure your cluster by:\n"
@@ -286,12 +291,11 @@ def _create_cluster(
         num_tries -= 1
         if num_tries == 0:
             return result.returncode, f"K8S cluster {cluster_name}."
-        else:
-            get_console(output=output).print(
-                f"[warning]Failed to create KinD cluster {cluster_name}. "
-                f"Retrying! There are {num_tries} tries left.\n"
-            )
-            _delete_cluster(python=python, kubernetes_version=kubernetes_version, output=output)
+        get_console(output=output).print(
+            f"[warning]Failed to create KinD cluster {cluster_name}. "
+            f"Retrying! There are {num_tries} tries left.\n"
+        )
+        _delete_cluster(python=python, kubernetes_version=kubernetes_version, output=output)
 
 
 @kubernetes_group.command(
@@ -323,7 +327,7 @@ def create_cluster(
     kubernetes_versions: str,
     python_versions: str,
 ):
-    result = create_virtualenv(force_venv_setup=False)
+    result = sync_virtualenv(force_venv_setup=False)
     if result.returncode != 0:
         sys.exit(result.returncode)
     make_sure_kubernetes_tools_are_installed()
@@ -436,7 +440,7 @@ def _delete_all_clusters():
 @option_verbose
 @option_dry_run
 def delete_cluster(python: str, kubernetes_version: str, all: bool):
-    result = create_virtualenv(force_venv_setup=False)
+    result = sync_virtualenv(force_venv_setup=False)
     if result.returncode != 0:
         sys.exit(result.returncode)
     make_sure_kubernetes_tools_are_installed()
@@ -453,8 +457,7 @@ def _get_python_kubernetes_version_from_name(cluster_name: str) -> tuple[str | N
         python = cluster_match.group(1)
         kubernetes_version = cluster_match.group(2)
         return python, kubernetes_version
-    else:
-        return None, None
+    return None, None
 
 
 LIST_CONSOLE_WIDTH = 120
@@ -520,7 +523,7 @@ def _status(python: str, kubernetes_version: str, wait_time_in_seconds: int) -> 
 @option_verbose
 @option_dry_run
 def status(kubernetes_version: str, python: str, wait_time_in_seconds: int, all: bool):
-    result = create_virtualenv(force_venv_setup=False)
+    result = sync_virtualenv(force_venv_setup=False)
     if result.returncode != 0:
         sys.exit(result.returncode)
     make_sure_kubernetes_tools_are_installed()
@@ -668,7 +671,7 @@ def build_k8s_image(
     skip_cleanup: bool,
     use_uv: bool,
 ):
-    result = create_virtualenv(force_venv_setup=False)
+    result = sync_virtualenv(force_venv_setup=False)
     if result.returncode != 0:
         sys.exit(result.returncode)
     make_sure_kubernetes_tools_are_installed()
@@ -741,7 +744,7 @@ def upload_k8s_image(
     python_versions: str,
     kubernetes_versions: str,
 ):
-    result = create_virtualenv(force_venv_setup=False)
+    result = sync_virtualenv(force_venv_setup=False)
     if result.returncode != 0:
         sys.exit(result.returncode)
     make_sure_kubernetes_tools_are_installed()
@@ -926,7 +929,7 @@ def configure_cluster(
     python_versions: str,
     kubernetes_versions: str,
 ):
-    result = create_virtualenv(force_venv_setup=False)
+    result = sync_virtualenv(force_venv_setup=False)
     if result.returncode != 0:
         sys.exit(result.returncode)
     make_sure_kubernetes_tools_are_installed()
@@ -992,7 +995,10 @@ def _deploy_helm_chart(
     extra_options: tuple[str, ...] | None = None,
     multi_namespace_mode: bool = False,
 ) -> RunCommandResult:
+    from packaging.version import Version
+
     cluster_name = get_kubectl_cluster_name(python=python, kubernetes_version=kubernetes_version)
+    _, api_server_port = get_kubernetes_port_numbers(python=python, kubernetes_version=kubernetes_version)
     action = "Deploying" if not upgrade else "Upgrading"
     get_console(output=output).print(f"[info]{action} {cluster_name} with airflow Helm Chart.")
     with tempfile.TemporaryDirectory(prefix="chart_") as tmp_dir:
@@ -1001,6 +1007,12 @@ def _deploy_helm_chart(
         get_console(output=output).print(f"[info]Copied chart sources to {tmp_chart_path}")
         kubectl_context = get_kubectl_cluster_name(python=python, kubernetes_version=kubernetes_version)
         params = BuildProdParams(python=python)
+        # TODO (potiuk): we can also run on matrix of auth managers if we make SimpleAuthManager prod-ready ?
+        use_flask_appbuilder = Version(python) < Version("3.13")
+        if use_flask_appbuilder:
+            auth_manager = "airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager"
+        else:
+            auth_manager = "airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager"
         helm_command = [
             "helm",
             "upgrade" if upgrade else "install",
@@ -1033,10 +1045,14 @@ def _deploy_helm_chart(
             "--set",
             "config.api_auth.jwt_secret=foo",
             "--set",
-            "config.core.auth_manager=airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager",
+            f"config.core.auth_manager={auth_manager}",
+            "--set",
+            f"config.api.base_url=http://localhost:{api_server_port}",
         ]
         if multi_namespace_mode:
             helm_command.extend(["--set", "multiNamespaceMode=true"])
+        if not use_flask_appbuilder:
+            helm_command.extend(["--set", "webserver.defaultUser.enabled=false"])
         if upgrade:
             # force upgrade
             helm_command.append("--force")
@@ -1255,7 +1271,7 @@ def deploy_airflow(
 @option_dry_run
 @click.argument("k9s_args", nargs=-1, type=click.UNPROCESSED)
 def k9s(python: str, kubernetes_version: str, use_docker: bool, k9s_args: tuple[str, ...]):
-    result = create_virtualenv(force_venv_setup=False)
+    result = sync_virtualenv(force_venv_setup=False)
     if result.returncode != 0:
         sys.exit(result.returncode)
     make_sure_kubernetes_tools_are_installed()
@@ -1387,7 +1403,7 @@ def shell(
     force_venv_setup: bool,
     shell_args: tuple[str, ...],
 ):
-    result = create_virtualenv(force_venv_setup=force_venv_setup)
+    result = sync_virtualenv(force_venv_setup=force_venv_setup)
     if result.returncode != 0:
         sys.exit(result.returncode)
     make_sure_kubernetes_tools_are_installed()
@@ -1400,7 +1416,7 @@ def shell(
     elif shell_binary.endswith("bash"):
         extra_args.extend(["--norc", "--noprofile"])
     result = run_command(
-        [shell_binary, *extra_args, *shell_args], env=env, check=False, cwd="kubernetes_tests"
+        [shell_binary, *extra_args, *shell_args], env=env, check=False, cwd="kubernetes-tests"
     )
     if result.returncode != 0:
         sys.exit(result.returncode)
@@ -1470,14 +1486,17 @@ def _run_tests(
             f"[info]You can deploy airflow with {executor} by running:[/]\nbreeze k8s configure-cluster\nbreeze k8s deploy-airflow --multi-namespace-mode --executor {executor}"
         )
         return 1, f"Tests {kubectl_cluster_name}"
-    the_tests: list[str] = ["kubernetes_tests/"]
-    command_to_run = " ".join([quote(arg) for arg in ["python3", "-m", "pytest", *the_tests, *test_args]])
+    pytest_cmd = ["uv", "run", "pytest"]
+    the_tests: list[str] = ["tests"]
+    ordered_unique_args = dict.fromkeys(chain(pytest_cmd, the_tests, test_args))
+    command_to_run = " ".join(quote(arg) for arg in ordered_unique_args)
     get_console(output).print(f"[info] Command to run:[/] {command_to_run}")
     result = run_command(
         [shell_binary, *extra_shell_args, "-c", command_to_run],
         output=output,
         env=env,
         check=False,
+        cwd=KUBERNETES_TEST_PATH.as_posix(),
     )
     return result.returncode, f"Tests {kubectl_cluster_name}"
 
@@ -1517,7 +1536,7 @@ def kubernetes_tests_command(
     kubernetes_versions: str,
     test_args: tuple[str, ...],
 ):
-    result = create_virtualenv(force_venv_setup=force_venv_setup)
+    result = sync_virtualenv(force_venv_setup=force_venv_setup)
     if result.returncode != 0:
         sys.exit(result.returncode)
     make_sure_kubernetes_tools_are_installed()
@@ -1570,6 +1589,7 @@ def kubernetes_tests_command(
 def _run_complete_tests(
     python: str,
     kubernetes_version: str,
+    include_success_outputs: bool,
     executor: str,
     rebuild_base_image: bool,
     copy_local_sources: bool,
@@ -1674,7 +1694,7 @@ def _run_complete_tests(
                 extra_options=extra_options,
                 multi_namespace_mode=True,
             )
-            if returncode != 0:
+            if returncode != 0 or include_success_outputs:
                 _logs(python=python, kubernetes_version=kubernetes_version)
         return returncode, message
     finally:
@@ -1746,7 +1766,7 @@ def run_complete_tests(
     use_uv: bool,
     wait_time_in_seconds: int,
 ):
-    result = create_virtualenv(force_venv_setup=force_venv_setup)
+    result = sync_virtualenv(force_venv_setup=force_venv_setup)
     if result.returncode != 0:
         sys.exit(1)
     make_sure_kubernetes_tools_are_installed()
@@ -1813,6 +1833,7 @@ def run_complete_tests(
         result, _ = _run_complete_tests(
             python=python,
             kubernetes_version=kubernetes_version,
+            include_success_outputs=include_success_outputs,
             executor=executor,
             rebuild_base_image=rebuild_base_image,
             copy_local_sources=copy_local_sources,

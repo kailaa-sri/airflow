@@ -137,7 +137,7 @@ class DataplexHook(GoogleBaseHook, OperationHelper):
             credentials=self.get_credentials(), client_info=CLIENT_INFO, client_options=client_options
         )
 
-    def wait_for_operation(self, timeout: float | None, operation: Operation):
+    def wait_for_operation(self, operation: Operation, timeout: float | None = None):
         """Wait for long-lasting operation to complete."""
         try:
             return operation.result(timeout=timeout)
@@ -515,7 +515,7 @@ class DataplexHook(GoogleBaseHook, OperationHelper):
             fields are non-required and omitted in the request body, their values are emptied.
         :param allow_missing: Optional. If set to true and entry doesn't exist, the service will create it.
         :param delete_missing_aspects: Optional. If set to true and the aspect_keys specify aspect
-            ranges, the service deletes any existing aspects from that range that weren't provided
+            ranges, the service deletes any existing aspects from that range that were not provided
             in the request.
         :param aspect_keys: Optional. The map keys of the Aspects which the service should modify.
             It supports the following syntax:

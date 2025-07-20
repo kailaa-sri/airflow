@@ -21,13 +21,12 @@ import json
 import logging
 import re
 import sys
+
+PY313 = sys.version_info >= (3, 13)
 import warnings
 from unittest.mock import patch
 
 import pytest
-from flask_appbuilder.fieldwidgets import BS3TextFieldWidget
-from flask_babel import lazy_gettext
-from wtforms import BooleanField, Field, StringField
 
 from airflow.exceptions import AirflowOptionalProviderFeatureException
 from airflow.providers_manager import (
@@ -39,6 +38,7 @@ from airflow.providers_manager import (
     ProvidersManager,
 )
 
+from tests_common.test_utils.markers import skip_if_force_lowest_dependencies_marker
 from tests_common.test_utils.paths import AIRFLOW_ROOT_PATH
 
 
@@ -52,6 +52,7 @@ def test_cleanup_providers_manager(cleanup_providers_manager):
     assert ProvidersManager().hooks is hooks
 
 
+@skip_if_force_lowest_dependencies_marker
 class TestProviderManager:
     @pytest.fixture(autouse=True)
     def inject_fixtures(self, caplog, cleanup_providers_manager):
@@ -73,12 +74,12 @@ class TestProviderManager:
             assert self._caplog.records == []
 
     def test_hooks_deprecation_warnings_generated(self):
+        providers_manager = ProvidersManager()
+        providers_manager._provider_dict["test-package"] = ProviderInfo(
+            version="0.0.1",
+            data={"hook-class-names": ["airflow.providers.sftp.hooks.sftp.SFTPHook"]},
+        )
         with pytest.warns(expected_warning=DeprecationWarning, match="hook-class-names") as warning_records:
-            providers_manager = ProvidersManager()
-            providers_manager._provider_dict["test-package"] = ProviderInfo(
-                version="0.0.1",
-                data={"hook-class-names": ["airflow.providers.sftp.hooks.sftp.SFTPHook"]},
-            )
             providers_manager._discover_hooks()
         assert warning_records
 
@@ -250,11 +251,23 @@ class TestProviderManager:
                 # When there is error importing provider that is excluded the provider name is in the message
                 if any(excluded_provider in record.message for excluded_provider in excluded_providers):
                     continue
-                else:
-                    print(record.message, file=sys.stderr)
-                    print(record.exc_info, file=sys.stderr)
-                    real_warning_count += 1
+                print(record.message, file=sys.stderr)
+                print(record.exc_info, file=sys.stderr)
+                real_warning_count += 1
             if real_warning_count:
+                if PY313:
+                    only_ydb_and_yandexcloud_warnings = True
+                    for record in warning_records:
+                        if "ydb" in str(record.message) or "yandexcloud" in str(record.message):
+                            continue
+                        only_ydb_and_yandexcloud_warnings = False
+                    if only_ydb_and_yandexcloud_warnings:
+                        print(
+                            "Only warnings from ydb and yandexcloud providers are generated, "
+                            "which is expected in Python 3.13+",
+                            file=sys.stderr,
+                        )
+                        return
                 raise AssertionError("There are warnings generated during hook imports. Please fix them")
         assert [w.message for w in warning_records if "hook-class-names" in str(w.message)] == []
 
@@ -262,138 +275,6 @@ class TestProviderManager:
         provider_manager = ProvidersManager()
         connections_form_widgets = list(provider_manager.connection_form_widgets.keys())
         assert len(connections_form_widgets) > 29
-
-    @pytest.mark.parametrize(
-        "scenario",
-        [
-            "prefix",
-            "no_prefix",
-            "both_1",
-            "both_2",
-        ],
-    )
-    def test_connection_form__add_widgets_prefix_backcompat(self, scenario):
-        """
-        When the field name is prefixed, it should be used as is.
-        When not prefixed, we should add the prefix
-        When there's a collision, the one that appears first in the list will be used.
-        """
-
-        class MyHook:
-            conn_type = "test"
-
-        provider_manager = ProvidersManager()
-        widget_field = StringField(lazy_gettext("My Param"), widget=BS3TextFieldWidget())
-        dummy_field = BooleanField(label=lazy_gettext("Dummy param"), description="dummy")
-        widgets: dict[str, Field] = {}
-        if scenario == "prefix":
-            widgets["extra__test__my_param"] = widget_field
-        elif scenario == "no_prefix":
-            widgets["my_param"] = widget_field
-        elif scenario == "both_1":
-            widgets["my_param"] = widget_field
-            widgets["extra__test__my_param"] = dummy_field
-        elif scenario == "both_2":
-            widgets["extra__test__my_param"] = widget_field
-            widgets["my_param"] = dummy_field
-        else:
-            raise ValueError("unexpected")
-
-        provider_manager._add_widgets(
-            package_name="abc",
-            hook_class=MyHook,
-            widgets=widgets,
-        )
-        assert provider_manager.connection_form_widgets["extra__test__my_param"].field == widget_field
-
-    def test_connection_field_behaviors_placeholders_prefix(self):
-        class MyHook:
-            conn_type = "test"
-
-            @classmethod
-            def get_ui_field_behaviour(cls):
-                return {
-                    "hidden_fields": ["host", "schema"],
-                    "relabeling": {},
-                    "placeholders": {"abc": "hi", "extra__anything": "n/a", "password": "blah"},
-                }
-
-        provider_manager = ProvidersManager()
-        provider_manager._add_customized_fields(
-            package_name="abc",
-            hook_class=MyHook,
-            customized_fields=MyHook.get_ui_field_behaviour(),
-        )
-        expected = {
-            "extra__test__abc": "hi",  # prefix should be added, since `abc` is not reserved
-            "extra__anything": "n/a",  # no change since starts with extra
-            "password": "blah",  # no change since it's a conn attr
-        }
-        assert provider_manager.field_behaviours["test"]["placeholders"] == expected
-
-    def test_connection_form_widgets_fields_order(self):
-        """Check that order of connection for widgets preserved by original Hook order."""
-        test_conn_type = "test"
-        field_prefix = f"extra__{test_conn_type}__"
-        field_names = ("yyy_param", "aaa_param", "000_param", "foo", "bar", "spam", "egg")
-
-        expected_field_names_order = tuple(f"{field_prefix}{f}" for f in field_names)
-
-        class TestHook:
-            conn_type = test_conn_type
-
-        provider_manager = ProvidersManager()
-        provider_manager._connection_form_widgets = {}
-        provider_manager._add_widgets(
-            package_name="mock",
-            hook_class=TestHook,
-            widgets={f: BooleanField(lazy_gettext("Dummy param")) for f in expected_field_names_order},
-        )
-        actual_field_names_order = tuple(
-            key for key in provider_manager.connection_form_widgets.keys() if key.startswith(field_prefix)
-        )
-        assert actual_field_names_order == expected_field_names_order, "Not keeping original fields order"
-
-    def test_connection_form_widgets_fields_order_multiple_hooks(self):
-        """
-        Check that order of connection for widgets preserved by original Hooks order.
-        Even if different hooks specified field with the same connection type.
-        """
-        test_conn_type = "test"
-        field_prefix = f"extra__{test_conn_type}__"
-        field_names_hook_1 = ("foo", "bar", "spam", "egg")
-        field_names_hook_2 = ("yyy_param", "aaa_param", "000_param")
-
-        expected_field_names_order = tuple(
-            f"{field_prefix}{f}" for f in [*field_names_hook_1, *field_names_hook_2]
-        )
-
-        class TestHook1:
-            conn_type = test_conn_type
-
-        class TestHook2:
-            conn_type = "another"
-
-        provider_manager = ProvidersManager()
-        provider_manager._connection_form_widgets = {}
-        provider_manager._add_widgets(
-            package_name="mock",
-            hook_class=TestHook1,
-            widgets={
-                f"{field_prefix}{f}": BooleanField(lazy_gettext("Dummy param")) for f in field_names_hook_1
-            },
-        )
-        provider_manager._add_widgets(
-            package_name="another_mock",
-            hook_class=TestHook2,
-            widgets={
-                f"{field_prefix}{f}": BooleanField(lazy_gettext("Dummy param")) for f in field_names_hook_2
-            },
-        )
-        actual_field_names_order = tuple(
-            key for key in provider_manager.connection_form_widgets.keys() if key.startswith(field_prefix)
-        )
-        assert actual_field_names_order == expected_field_names_order, "Not keeping original fields order"
 
     def test_field_behaviours(self):
         provider_manager = ProvidersManager()

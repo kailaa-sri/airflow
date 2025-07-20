@@ -27,11 +27,16 @@ from __future__ import annotations
 from airflow.utils.deprecation_tools import add_deprecated_classes
 
 __deprecated_classes = {
+    "base": {
+        "BaseSensorOperator": "airflow.sdk.bases.sensor.BaseSensorOperator",
+        "PokeReturnValue": "airflow.sdk.bases.sensor.PokeReturnValue",
+        "poke_mode_only": "airflow.sdk.bases.sensor.poke_mode_only",
+    },
     "python":{
         "PythonSensor": "airflow.providers.standard.sensors.python.PythonSensor",
     },
     "bash":{
-        "BashSensor": "airflow.providers.standard.sensor.bash.BashSensor",
+        "BashSensor": "airflow.providers.standard.sensors.bash.BashSensor",
     },
     "date_time":{
         "DateTimeSensor": "airflow.providers.standard.sensors.date_time.DateTimeSensor",

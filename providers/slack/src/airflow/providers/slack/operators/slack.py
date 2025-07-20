@@ -20,12 +20,10 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from functools import cached_property
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
-from typing_extensions import Literal
-
-from airflow.models import BaseOperator
 from airflow.providers.slack.hooks.slack import SlackHook
+from airflow.providers.slack.version_compat import BaseOperator
 
 if TYPE_CHECKING:
     from slack_sdk.http_retry import RetryHandler
@@ -145,7 +143,7 @@ class SlackAPIPostOperator(SlackAPIOperator):
             "https://www.youtube.com/watch?v=J---aiyznGQ"
         ),
         icon_url: str = (
-            "https://raw.githubusercontent.com/apache/airflow/main/airflow/www/static/pin_100.png"
+            "https://raw.githubusercontent.com/apache/airflow/main/airflow-core/src/airflow/ui/public/pin_100.png"
         ),
         blocks: list | None = None,
         attachments: list | None = None,

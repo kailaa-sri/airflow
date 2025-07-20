@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import TYPE_CHECKING, Any, Union
+from urllib.parse import quote_plus, urlencode
 
 from airflow.exceptions import AirflowOptionalProviderFeatureException
 from airflow.providers.common.sql.hooks.sql import DbApiHook
@@ -29,7 +30,12 @@ from airflow.providers.common.sql.hooks.sql import DbApiHook
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from airflow.models import Connection
+    from airflow.providers.mysql.version_compat import AIRFLOW_V_3_0_PLUS
+
+    if AIRFLOW_V_3_0_PLUS:
+        from airflow.sdk import Connection
+    else:
+        from airflow.models.connection import Connection  # type: ignore[assignment]
 
     try:
         from mysql.connector.abstracts import MySQLConnectionAbstract
@@ -110,8 +116,7 @@ class MySqlHook(DbApiHook):
         """
         if hasattr(conn.__class__, "autocommit") and isinstance(conn.__class__.autocommit, property):
             return conn.autocommit
-        else:
-            return conn.get_autocommit()  # type: ignore[union-attr]
+        return conn.get_autocommit()  # type: ignore[union-attr]
 
     def _get_conn_config_mysql_client(self, conn: Connection) -> dict:
         conn_config = {
@@ -130,7 +135,7 @@ class MySqlHook(DbApiHook):
 
         if conn.extra_dejson.get("charset", False):
             conn_config["charset"] = conn.extra_dejson["charset"]
-            if conn_config["charset"].lower() in ("utf8", "utf-8"):
+            if str(conn_config.get("charset", "undef")).lower() in ("utf8", "utf-8"):
                 conn_config["use_unicode"] = True
         if conn.extra_dejson.get("cursor", False):
             try:
@@ -253,7 +258,7 @@ class MySqlHook(DbApiHook):
             (tmp_file,),
         )
         conn.commit()
-        conn.close()  # type: ignore[misc]
+        conn.close()
 
     def bulk_dump(self, table: str, tmp_file: str) -> None:
         """Dump a database table into a tab-delimited file."""
@@ -270,7 +275,7 @@ class MySqlHook(DbApiHook):
             (tmp_file,),
         )
         conn.commit()
-        conn.close()  # type: ignore[misc]
+        conn.close()
 
     @staticmethod
     def _serialize_cell(cell: object, conn: Connection | None = None) -> Any:
@@ -337,7 +342,7 @@ class MySqlHook(DbApiHook):
 
         cursor.close()
         conn.commit()
-        conn.close()  # type: ignore[misc]
+        conn.close()
 
     def get_openlineage_database_info(self, connection):
         """Return MySQL specific information for OpenLineage."""
@@ -363,3 +368,41 @@ class MySqlHook(DbApiHook):
     def get_openlineage_default_schema(self):
         """MySQL has no concept of schema."""
         return None
+
+    def get_uri(self) -> str:
+        """Get URI for MySQL connection."""
+        conn = self.connection or self.get_connection(self.get_conn_id())
+        conn_schema = self.schema or conn.schema or ""
+        client_name = conn.extra_dejson.get("client", "mysqlclient")
+
+        # Determine URI prefix based on client
+        if client_name == "mysql-connector-python":
+            uri_prefix = "mysql+mysqlconnector://"
+        else:  # default: mysqlclient
+            uri_prefix = "mysql://"
+
+        auth_part = ""
+        if conn.login:
+            auth_part = quote_plus(conn.login)
+            if conn.password:
+                auth_part = f"{auth_part}:{quote_plus(conn.password)}"
+            auth_part = f"{auth_part}@"
+
+        host_part = conn.host or "localhost"
+        if conn.port:
+            host_part = f"{host_part}:{conn.port}"
+
+        schema_part = f"/{quote_plus(conn_schema)}" if conn_schema else ""
+
+        uri = f"{uri_prefix}{auth_part}{host_part}{schema_part}"
+
+        # Add extra connection parameters
+        extra = conn.extra_dejson.copy()
+        if "client" in extra:
+            extra.pop("client")
+
+        query_params = {k: str(v) for k, v in extra.items() if v}
+        if query_params:
+            uri = f"{uri}?{urlencode(query_params)}"
+
+        return uri

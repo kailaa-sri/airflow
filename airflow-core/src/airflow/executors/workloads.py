@@ -20,7 +20,7 @@ import os
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Literal, Union
+from typing import TYPE_CHECKING, Annotated, Literal
 
 import structlog
 from pydantic import BaseModel, Field
@@ -36,7 +36,7 @@ __all__ = [
     "ExecuteTask",
 ]
 
-log = structlog.get_logger()
+log = structlog.get_logger(__name__)
 
 
 class BaseWorkload(BaseModel):
@@ -55,7 +55,7 @@ class TaskInstance(BaseModel):
     """Schema for TaskInstance with minimal required fields needed for Executors and Task SDK."""
 
     id: uuid.UUID
-
+    dag_version_id: uuid.UUID
     task_id: str
     dag_id: str
     run_id: str
@@ -66,6 +66,9 @@ class TaskInstance(BaseModel):
     queue: str
     priority_weight: int
     executor_config: dict | None = Field(default=None, exclude=True)
+
+    parent_context_carrier: dict | None = None
+    context_carrier: dict | None = None
 
     # TODO: Task-SDK: Can we replace TastInstanceKey with just the uuid across the codebase?
     @property
@@ -94,21 +97,27 @@ class ExecuteTask(BaseWorkload):
     log_path: str | None
     """The rendered relative log filename template the task logs should be written to"""
 
-    kind: Literal["ExecuteTask"] = Field(init=False, default="ExecuteTask")
+    type: Literal["ExecuteTask"] = Field(init=False, default="ExecuteTask")
 
     @classmethod
     def make(
-        cls, ti: TIModel, dag_rel_path: Path | None = None, generator: JWTGenerator | None = None
+        cls,
+        ti: TIModel,
+        dag_rel_path: Path | None = None,
+        generator: JWTGenerator | None = None,
+        bundle_info: BundleInfo | None = None,
     ) -> ExecuteTask:
         from pathlib import Path
 
         from airflow.utils.helpers import log_filename_template_renderer
 
         ser_ti = TaskInstance.model_validate(ti, from_attributes=True)
-        bundle_info = BundleInfo(
-            name=ti.dag_model.bundle_name,
-            version=ti.dag_run.bundle_version,
-        )
+        ser_ti.parent_context_carrier = ti.dag_run.context_carrier
+        if not bundle_info:
+            bundle_info = BundleInfo(
+                name=ti.dag_model.bundle_name,
+                version=ti.dag_run.bundle_version,
+            )
         fname = log_filename_template_renderer()(ti=ti)
         token = ""
 
@@ -146,10 +155,10 @@ class RunTrigger(BaseModel):
 
     timeout_after: datetime | None = None
 
-    kind: Literal["RunTrigger"] = Field(init=False, default="RunTrigger")
+    type: Literal["RunTrigger"] = Field(init=False, default="RunTrigger")
 
 
 All = Annotated[
-    Union[ExecuteTask, RunTrigger],
-    Field(discriminator="kind"),
+    ExecuteTask | RunTrigger,
+    Field(discriminator="type"),
 ]

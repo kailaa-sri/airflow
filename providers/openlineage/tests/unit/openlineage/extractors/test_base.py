@@ -24,7 +24,13 @@ from attrs import Factory, define, field
 from openlineage.client.event_v2 import Dataset
 from openlineage.client.facet_v2 import BaseFacet, JobFacet, parent_run, sql_job
 
-from airflow.models.baseoperator import BaseOperator
+from tests_common.test_utils.version_compat import AIRFLOW_V_3_0_PLUS
+
+if AIRFLOW_V_3_0_PLUS:
+    from airflow.sdk import BaseOperator
+else:
+    from airflow.models.baseoperator import BaseOperator  # type: ignore[no-redef]
+
 from airflow.models.taskinstance import TaskInstanceState
 from airflow.providers.openlineage.extractors.base import (
     BaseExtractor,
@@ -38,7 +44,7 @@ from tests_common.test_utils.compat import PythonOperator
 
 if TYPE_CHECKING:
     from openlineage.client.facet_v2 import RunFacet
-pytestmark = pytest.mark.db_test
+
 
 INPUTS = [Dataset(namespace="database://host:port", name="inputtable")]
 OUTPUTS = [Dataset(namespace="database://host:port", name="inputtable")]
@@ -65,10 +71,54 @@ FINISHED_FACETS: dict[str, JobFacet] = {"complete": CompleteRunFacet(True)}
 FAILED_FACETS: dict[str, JobFacet] = {"failure": FailRunFacet(True)}
 
 
-class ExampleExtractor(BaseExtractor):
+class ExtractorWithoutExecuteOnFailure(BaseExtractor):
     @classmethod
     def get_operator_classnames(cls):
-        return ["OperatorWithoutFailure"]
+        return ["SimpleCustomOperator"]
+
+    def _execute_extraction(self) -> OperatorLineage | None:
+        return OperatorLineage(
+            inputs=INPUTS,
+            outputs=OUTPUTS,
+            run_facets=RUN_FACETS,
+            job_facets=JOB_FACETS,
+        )
+
+    def extract_on_complete(self, task_instance) -> OperatorLineage | None:
+        return OperatorLineage(
+            inputs=INPUTS,
+            outputs=OUTPUTS,
+            run_facets=RUN_FACETS,
+            job_facets=FINISHED_FACETS,
+        )
+
+
+class ExtractorWithExecuteExtractionOnly(BaseExtractor):
+    @classmethod
+    def get_operator_classnames(cls):
+        return ["AnotherOperator"]
+
+    def _execute_extraction(self) -> OperatorLineage | None:
+        return OperatorLineage(
+            inputs=INPUTS,
+            outputs=OUTPUTS,
+            run_facets=RUN_FACETS,
+            job_facets=JOB_FACETS,
+        )
+
+
+class SimpleCustomOperator(BaseOperator):
+    def execute(self, context) -> Any:
+        pass
+
+    def get_openlineage_facets_on_start(self) -> OperatorLineage:
+        return OperatorLineage()
+
+    def get_openlineage_facets_on_complete(self, task_instance) -> OperatorLineage:
+        return OperatorLineage()
+
+    def get_openlineage_facets_on_failure(self, task_instance) -> OperatorLineage:
+        return OperatorLineage()
 
 
 class OperatorWithoutFailure(BaseOperator):
@@ -161,7 +211,7 @@ class OperatorDifferentOperatorLineageClass(BaseOperator):
             job_facets: dict[str, BaseFacet] = Factory(dict)
             some_other_param: dict = Factory(dict)
 
-        return DifferentOperatorLineage(  # type: ignore
+        return DifferentOperatorLineage(
             name="unused",
             inputs=INPUTS,
             outputs=OUTPUTS,
@@ -182,7 +232,7 @@ class OperatorWrongOperatorLineageClass(BaseOperator):
             outputs: list[Dataset] = Factory(list)
             some_other_param: dict = Factory(dict)
 
-        return WrongOperatorLineage(  # type: ignore
+        return WrongOperatorLineage(
             inputs=INPUTS,
             outputs=OUTPUTS,
             some_other_param={"asdf": "fdsa"},
@@ -321,9 +371,38 @@ def test_extractor_manager_calls_appropriate_extractor_method(
 
 @mock.patch("airflow.providers.openlineage.conf.custom_extractors")
 def test_extractors_env_var(custom_extractors):
-    custom_extractors.return_value = {"unit.openlineage.extractors.test_base.ExampleExtractor"}
-    extractor = ExtractorManager().get_extractor_class(OperatorWithoutFailure(task_id="example"))
-    assert extractor is ExampleExtractor
+    custom_extractors.return_value = {
+        "unit.openlineage.extractors.test_base.ExtractorWithoutExecuteOnFailure"
+    }
+    extractor = ExtractorManager().get_extractor_class(SimpleCustomOperator(task_id="example"))
+    assert extractor is ExtractorWithoutExecuteOnFailure
+
+
+def test_extractor_without_extract_on_failure_calls_extract_on_complete():
+    extractor = ExtractorWithoutExecuteOnFailure(SimpleCustomOperator(task_id="example"))
+    result = extractor.extract_on_failure(None)
+    assert result == OperatorLineage(
+        inputs=INPUTS,
+        outputs=OUTPUTS,
+        run_facets=RUN_FACETS,
+        job_facets=FINISHED_FACETS,
+    )
+
+
+def test_extractor_without_extract_on_complete_and_failure_always_calls_extract():
+    extractor = ExtractorWithExecuteExtractionOnly(SimpleCustomOperator(task_id="example"))
+    expected_result = OperatorLineage(
+        inputs=INPUTS,
+        outputs=OUTPUTS,
+        run_facets=RUN_FACETS,
+        job_facets=JOB_FACETS,
+    )
+    result = extractor.extract_on_failure(None)
+    assert result == expected_result
+    result = extractor.extract_on_complete(None)
+    assert result == expected_result
+    result = extractor.extract()
+    assert result == expected_result
 
 
 def test_does_not_use_default_extractor_when_not_a_method():

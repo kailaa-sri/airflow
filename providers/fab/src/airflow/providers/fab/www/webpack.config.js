@@ -176,11 +176,11 @@ const config = {
       patterns: [
         {
           from: "node_modules/jquery-ui/dist/jquery-ui.min.js",
-          flatten: true,
+          to: "jquery-ui.min.js",
         },
         {
           from: "node_modules/jquery-ui/dist/themes/base/jquery-ui.min.css",
-          flatten: true,
+          to: "jquery-ui.min.css",
         },
       ],
     }),
@@ -207,6 +207,12 @@ const config = {
   optimization: {
     minimize: process.env.NODE_ENV === "production",
     minimizer: [new CssMinimizerPlugin({}), new TerserPlugin()],
+    moduleIds: 'deterministic',
+    chunkIds: 'deterministic',
+    runtimeChunk: 'single',
+    splitChunks: {
+      chunks: 'all',
+    },
   },
 };
 

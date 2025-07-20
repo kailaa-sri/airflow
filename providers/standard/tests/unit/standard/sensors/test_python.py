@@ -32,6 +32,7 @@ pytestmark = pytest.mark.db_test
 
 
 class TestPythonSensor(BasePythonTest):
+    # TODO(kaxil) - this typing hint is fishy
     opcls = PythonSensor
 
     def test_python_sensor_true(self):

@@ -29,6 +29,7 @@ from tests_common.test_utils.format_datetime import from_datetime_to_zulu, from_
 pytestmark = pytest.mark.db_test
 
 DAG_ID = "TEST_DAG_ID"
+DAG_DISPLAY_NAME = "TEST_DAG_ID"
 DAG_RUN_ID = "TEST_DAG_RUN_ID"
 TASK_ID = "TEST_TASK_ID"
 DAG_EXECUTION_DATE = datetime(2024, 6, 15, 0, 0, tzinfo=timezone.utc)
@@ -48,7 +49,7 @@ EVENT_NON_EXISTED_ID = 9999
 
 
 class TestEventLogsEndpoint:
-    """Common class for /api/v2/eventLogs related unit tests."""
+    """Common class for /eventLogs related unit tests."""
 
     @staticmethod
     def _clear_db():
@@ -128,6 +129,7 @@ class TestGetEventLog(TestEventLogsEndpoint):
                 200,
                 {
                     "dag_id": DAG_ID,
+                    "dag_display_name": DAG_DISPLAY_NAME,
                     "event": TASK_INSTANCE_EVENT,
                     "map_index": -1,
                     "owner": OWNER_AIRFLOW,
@@ -140,6 +142,7 @@ class TestGetEventLog(TestEventLogsEndpoint):
                 200,
                 {
                     "dag_id": DAG_ID,
+                    "dag_display_name": DAG_DISPLAY_NAME,
                     "event": EVENT_WITH_OWNER_AND_TASK_INSTANCE,
                     "map_index": -1,
                     "owner": OWNER,
@@ -154,7 +157,7 @@ class TestGetEventLog(TestEventLogsEndpoint):
     def test_get_event_log(self, test_client, setup, event_log_key, expected_status_code, expected_body):
         event_log: Log | None = setup.get(event_log_key, None)
         event_log_id = event_log.id if event_log else EVENT_NON_EXISTED_ID
-        response = test_client.get(f"/api/v2/eventLogs/{event_log_id}")
+        response = test_client.get(f"/eventLogs/{event_log_id}")
         assert response.status_code == expected_status_code
         if expected_status_code != 200:
             return
@@ -162,6 +165,7 @@ class TestGetEventLog(TestEventLogsEndpoint):
         expected_json = {
             "event_log_id": event_log_id,
             "when": from_datetime_to_zulu(event_log.dttm) if event_log.dttm else None,
+            "dag_display_name": expected_body.get("dag_display_name"),
             "dag_id": expected_body.get("dag_id"),
             "task_id": expected_body.get("task_id"),
             "run_id": expected_body.get("run_id"),
@@ -179,12 +183,12 @@ class TestGetEventLog(TestEventLogsEndpoint):
 
     def test_should_raises_401_unauthenticated(self, unauthenticated_test_client, setup):
         event_log_id = setup[EVENT_NORMAL].id
-        response = unauthenticated_test_client.get(f"/api/v2/eventLogs/{event_log_id}")
+        response = unauthenticated_test_client.get(f"/eventLogs/{event_log_id}")
         assert response.status_code == 401
 
     def test_should_raises_403_forbidden(self, unauthorized_test_client, setup):
         event_log_id = setup[EVENT_NORMAL].id
-        response = unauthorized_test_client.get(f"/api/v2/eventLogs/{event_log_id}")
+        response = unauthorized_test_client.get(f"/eventLogs/{event_log_id}")
         assert response.status_code == 403
 
 
@@ -307,7 +311,7 @@ class TestGetEventLogs(TestEventLogsEndpoint):
     def test_get_event_logs(
         self, test_client, query_params, expected_status_code, expected_total_entries, expected_events
     ):
-        response = test_client.get("/api/v2/eventLogs", params=query_params)
+        response = test_client.get("/eventLogs", params=query_params)
         assert response.status_code == expected_status_code
         if expected_status_code != 200:
             return
@@ -318,9 +322,9 @@ class TestGetEventLogs(TestEventLogsEndpoint):
             assert event_log["event"] == expected_event
 
     def test_should_raises_401_unauthenticated(self, unauthenticated_test_client):
-        response = unauthenticated_test_client.get("/api/v2/eventLogs")
+        response = unauthenticated_test_client.get("/eventLogs")
         assert response.status_code == 401
 
     def test_should_raises_403_forbidden(self, unauthorized_test_client):
-        response = unauthorized_test_client.get("/api/v2/eventLogs")
+        response = unauthorized_test_client.get("/eventLogs")
         assert response.status_code == 403

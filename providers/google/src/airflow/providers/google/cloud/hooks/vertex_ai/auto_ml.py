@@ -37,6 +37,7 @@ from google.cloud.aiplatform import (
 from google.cloud.aiplatform_v1 import JobServiceClient, PipelineServiceClient
 
 from airflow.exceptions import AirflowException, AirflowProviderDeprecationWarning
+from airflow.providers.google.common.consts import CLIENT_INFO
 from airflow.providers.google.common.deprecated import deprecated
 from airflow.providers.google.common.hooks.base_google import GoogleBaseHook
 from airflow.providers.google.common.hooks.operation_helpers import OperationHelper
@@ -81,7 +82,7 @@ class AutoMLHook(GoogleBaseHook, OperationHelper):
             client_options = ClientOptions()
 
         return PipelineServiceClient(
-            credentials=self.get_credentials(), client_info=self.client_info, client_options=client_options
+            credentials=self.get_credentials(), client_info=CLIENT_INFO, client_options=client_options
         )
 
     def get_job_service_client(
@@ -95,7 +96,7 @@ class AutoMLHook(GoogleBaseHook, OperationHelper):
             client_options = ClientOptions()
 
         return JobServiceClient(
-            credentials=self.get_credentials(), client_info=self.client_info, client_options=client_options
+            credentials=self.get_credentials(), client_info=CLIENT_INFO, client_options=client_options
         )
 
     def get_auto_ml_tabular_training_job(
@@ -176,42 +177,6 @@ class AutoMLHook(GoogleBaseHook, OperationHelper):
             multi_label=multi_label,
             model_type=model_type,
             base_model=base_model,
-            project=project,
-            location=location,
-            credentials=self.get_credentials(),
-            labels=labels,
-            training_encryption_spec_key_name=training_encryption_spec_key_name,
-            model_encryption_spec_key_name=model_encryption_spec_key_name,
-        )
-
-    @deprecated(
-        planned_removal_date="June 15, 2025",
-        category=AirflowProviderDeprecationWarning,
-        reason="Deprecation of AutoMLText API",
-    )
-    def get_auto_ml_text_training_job(
-        self,
-        display_name: str,
-        prediction_type: str,
-        multi_label: bool = False,
-        sentiment_max: int = 10,
-        project: str | None = None,
-        location: str | None = None,
-        labels: dict[str, str] | None = None,
-        training_encryption_spec_key_name: str | None = None,
-        model_encryption_spec_key_name: str | None = None,
-    ) -> AutoMLTextTrainingJob:
-        """
-        Return AutoMLTextTrainingJob object.
-
-        WARNING: Text creation API is deprecated since September 15, 2024
-        (https://cloud.google.com/vertex-ai/docs/tutorials/text-classification-automl/overview).
-        """
-        return AutoMLTextTrainingJob(
-            display_name=display_name,
-            prediction_type=prediction_type,
-            multi_label=multi_label,
-            sentiment_max=sentiment_max,
             project=project,
             location=location,
             credentials=self.get_credentials(),
@@ -1133,13 +1098,13 @@ class AutoMLHook(GoogleBaseHook, OperationHelper):
             raise AirflowException("AutoMLTextTrainingJob was not created")
 
         model = self._job.run(
-            dataset=dataset,  # type: ignore[arg-type]
-            training_fraction_split=training_fraction_split,  # type: ignore[call-arg]
-            validation_fraction_split=validation_fraction_split,  # type: ignore[call-arg]
+            dataset=dataset,
+            training_fraction_split=training_fraction_split,
+            validation_fraction_split=validation_fraction_split,
             test_fraction_split=test_fraction_split,
             training_filter_split=training_filter_split,
             validation_filter_split=validation_filter_split,
-            test_filter_split=test_filter_split,  # type: ignore[call-arg]
+            test_filter_split=test_filter_split,
             model_display_name=model_display_name,
             model_labels=model_labels,
             sync=sync,

@@ -39,7 +39,7 @@ airflow_version = "3.0.0"
 
 _STRING_COLUMN_TYPE = sa.String(length=1500).with_variant(
     sa.String(length=1500, collation="latin1_general_cs"),
-    dialect_name="mysql",
+    "mysql",
 )
 
 
@@ -70,7 +70,7 @@ def downgrade():
         )
     op.execute(
         "update dataset set is_orphaned = true "
-        "where exists (select 1 from asset_active "
+        "where not exists (select 1 from asset_active "
         "where dataset.name = asset_active.name and dataset.uri = asset_active.uri)"
     )
 

@@ -17,26 +17,31 @@
  * under the License.
  */
 import React from "react";
+import { useTranslation } from "react-i18next";
 
 import { Dialog } from "src/components/ui";
 
 import TimezoneSelector from "./TimezoneSelector";
 
 type TimezoneModalProps = {
-  isOpen: boolean;
-  onClose: () => void;
+  readonly isOpen: boolean;
+  readonly onClose: () => void;
 };
 
-const TimezoneModal: React.FC<TimezoneModalProps> = ({ isOpen, onClose }) => (
-  <Dialog.Root lazyMount onOpenChange={onClose} open={isOpen} size="xl">
-    <Dialog.Content backdrop>
-      <Dialog.Header>Select Timezone</Dialog.Header>
-      <Dialog.CloseTrigger />
-      <Dialog.Body>
-        <TimezoneSelector />
-      </Dialog.Body>
-    </Dialog.Content>
-  </Dialog.Root>
-);
+const TimezoneModal: React.FC<TimezoneModalProps> = ({ isOpen, onClose }) => {
+  const { t: translate } = useTranslation("common");
+
+  return (
+    <Dialog.Root lazyMount onOpenChange={onClose} open={isOpen} size="xl">
+      <Dialog.Content backdrop>
+        <Dialog.Header>{translate("timezoneModal.title")}</Dialog.Header>
+        <Dialog.CloseTrigger />
+        <Dialog.Body>
+          <TimezoneSelector />
+        </Dialog.Body>
+      </Dialog.Content>
+    </Dialog.Root>
+  );
+};
 
 export default TimezoneModal;

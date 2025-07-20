@@ -17,9 +17,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Container
+from collections.abc import Callable, Container
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from pendulum.parsing import ParserError
 from sqlalchemy import text
@@ -104,7 +104,7 @@ def format_parameters(params_formatters: dict[str, Callable[[Any], Any]]) -> Cal
                     kwargs[key] = formatter(kwargs[key])
             return func(*args, **kwargs)
 
-        return cast(T, wrapped_function)
+        return cast("T", wrapped_function)
 
     return format_parameters_decorator
 

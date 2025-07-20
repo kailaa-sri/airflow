@@ -26,8 +26,7 @@ from typing import TYPE_CHECKING, Any
 from airflow.configuration import conf
 from airflow.exceptions import AirflowException
 from airflow.providers.amazon.aws.exceptions import EcsOperatorError, EcsTaskFailToStart
-from airflow.providers.amazon.aws.hooks.base_aws import AwsBaseHook
-from airflow.providers.amazon.aws.hooks.ecs import EcsClusterStates, EcsHook, should_retry_eni
+from airflow.providers.amazon.aws.hooks.ecs import EcsClusterStates, EcsHook
 from airflow.providers.amazon.aws.hooks.logs import AwsLogsHook
 from airflow.providers.amazon.aws.operators.base_aws import AwsBaseOperator
 from airflow.providers.amazon.aws.triggers.ecs import (
@@ -517,7 +516,7 @@ class EcsRunTaskOperator(EcsBaseOperator):
         if self.reattach:
             # Generate deterministic UUID which refers to unique TaskInstanceKey
             ti: TaskInstance = context["ti"]
-            self._started_by = generate_uuid(*map(str, ti.key.primary))
+            self._started_by = generate_uuid(*map(str, [ti.dag_id, ti.task_id, ti.run_id, ti.map_index]))
             self.log.info("Try to find run with startedBy=%r", self._started_by)
             self._try_reattach_task(started_by=self._started_by)
 
@@ -526,7 +525,7 @@ class EcsRunTaskOperator(EcsBaseOperator):
             self._start_task()
 
         if self.do_xcom_push:
-            self.xcom_push(context, key="ecs_task_arn", value=self.arn)
+            context["ti"].xcom_push(key="ecs_task_arn", value=self.arn)
 
         if self.deferrable:
             self.defer(
@@ -567,8 +566,7 @@ class EcsRunTaskOperator(EcsBaseOperator):
 
         if self.do_xcom_push and self.task_log_fetcher:
             return self.task_log_fetcher.get_last_log_message()
-        else:
-            return None
+        return None
 
     def execute_complete(self, context: Context, event: dict[str, Any] | None = None) -> str | None:
         validated_event = validate_execute_complete_event(event)
@@ -689,7 +687,6 @@ class EcsRunTaskOperator(EcsBaseOperator):
             logger=self.log,
         )
 
-    @AwsBaseHook.retry(should_retry_eni)
     def _check_success_task(self) -> None:
         if not self.client or not self.arn:
             return
@@ -702,11 +699,6 @@ class EcsRunTaskOperator(EcsBaseOperator):
 
         for task in response["tasks"]:
             if task.get("stopCode", "") == "TaskFailedToStart":
-                # Reset task arn here otherwise the retry run will not start
-                # a new task but keep polling the old dead one
-                # I'm not resetting it for other exceptions here because
-                # EcsTaskFailToStart is the only exception that's being retried at the moment
-                self.arn = None
                 raise EcsTaskFailToStart(f"The task failed to start due to: {task.get('stoppedReason', '')}")
 
             # This is a `stoppedReason` that indicates a task has not
@@ -729,11 +721,10 @@ class EcsRunTaskOperator(EcsBaseOperator):
                             f"This task is not in success state - last {self.number_logs_exception} "
                             f"logs from Cloudwatch:\n{last_logs}"
                         )
-                    else:
-                        raise AirflowException(f"This task is not in success state {task}")
-                elif container.get("lastStatus") == "PENDING":
+                    raise AirflowException(f"This task is not in success state {task}")
+                if container.get("lastStatus") == "PENDING":
                     raise AirflowException(f"This task is still pending {task}")
-                elif "error" in container.get("reason", "").lower():
+                if "error" in container.get("reason", "").lower():
                     raise AirflowException(
                         f"This containers encounter an error during launching: "
                         f"{container.get('reason', '').lower()}"

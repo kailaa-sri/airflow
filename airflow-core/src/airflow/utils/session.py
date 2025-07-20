@@ -17,15 +17,15 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from functools import wraps
 from inspect import signature
-from typing import Callable, TypeVar, cast
-
-from sqlalchemy.orm import Session as SASession
+from typing import TYPE_CHECKING, ParamSpec, TypeVar, cast
 
 from airflow import settings
-from airflow.typing_compat import ParamSpec
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session as SASession
 
 
 @contextlib.contextmanager
@@ -96,9 +96,8 @@ def provide_session(func: Callable[PS, RT]) -> Callable[PS, RT]:
     def wrapper(*args, **kwargs) -> RT:
         if "session" in kwargs or session_args_idx < len(args):
             return func(*args, **kwargs)
-        else:
-            with create_session() as session:
-                return func(*args, session=session, **kwargs)
+        with create_session() as session:
+            return func(*args, session=session, **kwargs)
 
     return wrapper
 
@@ -107,4 +106,4 @@ def provide_session(func: Callable[PS, RT]) -> Callable[PS, RT]:
 # the 'session' argument to be of type Session instead of Session | None,
 # making it easier to type hint the function body without dealing with the None
 # case that can never happen at runtime.
-NEW_SESSION: SASession = cast(SASession, None)
+NEW_SESSION: SASession = cast("SASession", None)

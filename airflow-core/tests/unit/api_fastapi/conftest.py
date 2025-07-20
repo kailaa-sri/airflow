@@ -21,13 +21,12 @@ import os
 from typing import TYPE_CHECKING
 
 import pytest
+import time_machine
 from fastapi.testclient import TestClient
 
 from airflow.api_fastapi.app import create_app
 from airflow.api_fastapi.auth.managers.simple.user import SimpleAuthManagerUser
 from airflow.models import Connection
-from airflow.models.dag_version import DagVersion
-from airflow.models.serialized_dag import SerializedDagModel
 from airflow.providers.standard.operators.empty import EmptyOperator
 
 from tests_common.test_utils.config import conf_vars
@@ -36,9 +35,24 @@ from tests_common.test_utils.db import clear_db_connections, parse_and_sync_to_d
 if TYPE_CHECKING:
     from airflow.api_fastapi.auth.managers.simple.simple_auth_manager import SimpleAuthManager
 
+API_PATHS = {
+    "public": "/api/v2",
+    "ui": "/ui",
+}
+
+BASE_URL = "http://testserver"
+
+
+def get_api_path(request):
+    """Determine the API path based on the test's subdirectory."""
+    test_dir = os.path.dirname(request.path)
+    subdirectory_name = test_dir.split("/")[-1]
+
+    return API_PATHS.get(subdirectory_name, "/")
+
 
 @pytest.fixture
-def test_client():
+def test_client(request):
     with conf_vars(
         {
             (
@@ -52,25 +66,25 @@ def test_client():
         # set time_very_before to 2014-01-01 00:00:00 and time_very_after to tomorrow
         # to make the JWT token always valid for all test cases with time_machine
         time_very_before = datetime.datetime(2014, 1, 1, 0, 0, 0)
-        time_very_after = datetime.datetime.now() + datetime.timedelta(days=1)
-        token = auth_manager._get_token_signer().generate(
-            {
-                "iat": time_very_before,
-                "nbf": time_very_before,
-                "exp": time_very_after,
-                **auth_manager.serialize_user(SimpleAuthManagerUser(username="test", role="admin")),
-            }
+        time_after = datetime.datetime.now() + datetime.timedelta(days=1)
+        with time_machine.travel(time_very_before, tick=False):
+            token = auth_manager._get_token_signer(
+                expiration_time_in_seconds=(time_after - time_very_before).total_seconds()
+            ).generate(
+                auth_manager.serialize_user(SimpleAuthManagerUser(username="test", role="admin")),
+            )
+        yield TestClient(
+            app, headers={"Authorization": f"Bearer {token}"}, base_url=f"{BASE_URL}{get_api_path(request)}"
         )
-        yield TestClient(app, headers={"Authorization": f"Bearer {token}"})
 
 
 @pytest.fixture
-def unauthenticated_test_client():
-    return TestClient(create_app())
+def unauthenticated_test_client(request):
+    return TestClient(create_app(), base_url=f"{BASE_URL}{get_api_path(request)}")
 
 
 @pytest.fixture
-def unauthorized_test_client():
+def unauthorized_test_client(request):
     with conf_vars(
         {
             (
@@ -84,16 +98,18 @@ def unauthorized_test_client():
         token = auth_manager._get_token_signer().generate(
             auth_manager.serialize_user(SimpleAuthManagerUser(username="dummy", role=None))
         )
-        yield TestClient(app, headers={"Authorization": f"Bearer {token}"})
+        yield TestClient(
+            app, headers={"Authorization": f"Bearer {token}"}, base_url=f"{BASE_URL}{get_api_path(request)}"
+        )
 
 
 @pytest.fixture
-def client():
+def client(request):
     """This fixture is more flexible than test_client, as it allows to specify which apps to include."""
 
     def create_test_client(apps="all"):
         app = create_app(apps=apps)
-        return TestClient(app)
+        return TestClient(app, base_url=f"{BASE_URL}{get_api_path(request)}")
 
     return create_test_client
 
@@ -115,16 +131,19 @@ def configure_git_connection_for_dag_bundle(session):
             (
                 "dag_processor",
                 "dag_bundle_config_list",
-            ): '[{ "name": "dag_maker", "classpath": "airflow.dag_processing.bundles.git.GitDagBundle", "kwargs": {"subdir": "dags", "tracking_ref": "main", "refresh_interval": 0}}, { "name": "another_bundle_name", "classpath": "airflow.dag_processing.bundles.git.GitDagBundle", "kwargs": {"subdir": "dags", "tracking_ref": "main", "refresh_interval": 0}}]'
+            ): '[{ "name": "dag_maker", "classpath": "airflow.providers.git.bundles.git.GitDagBundle", "kwargs": {"subdir": "dags", "tracking_ref": "main", "refresh_interval": 0}}, { "name": "another_bundle_name", "classpath": "airflow.providers.git.bundles.git.GitDagBundle", "kwargs": {"subdir": "dags", "tracking_ref": "main", "refresh_interval": 0}}]'
         }
     ):
         yield
-
+    # in case no flush or commit was executed after the "session.add" above, we need to flush the session
+    # manually here to make sure that the added connection will be deleted by query(Connection).delete()
+    # in the`clear_db_connections` function below
+    session.flush()
     clear_db_connections(False)
 
 
 @pytest.fixture
-def make_dag_with_multiple_versions(dag_maker, configure_git_connection_for_dag_bundle):
+def make_dag_with_multiple_versions(dag_maker, configure_git_connection_for_dag_bundle, session):
     """
     Create DAG with multiple versions
 
@@ -134,18 +153,19 @@ def make_dag_with_multiple_versions(dag_maker, configure_git_connection_for_dag_
     """
     dag_id = "dag_with_multiple_versions"
     for version_number in range(1, 4):
-        with dag_maker(dag_id) as dag:
+        with dag_maker(
+            dag_id,
+            session=session,
+            bundle_version=f"some_commit_hash{version_number}",
+        ):
             for task_number in range(version_number):
                 EmptyOperator(task_id=f"task{task_number + 1}")
-        SerializedDagModel.write_dag(
-            dag, bundle_name="dag_maker", bundle_version=f"some_commit_hash{version_number}"
-        )
         dag_maker.create_dagrun(
             run_id=f"run{version_number}",
             logical_date=datetime.datetime(2020, 1, version_number, tzinfo=datetime.timezone.utc),
-            dag_version=DagVersion.get_version(dag_id=dag_id, version_number=version_number),
+            session=session,
         )
-        dag.sync_to_db()
+        session.commit()
 
 
 @pytest.fixture(scope="module")
@@ -154,3 +174,15 @@ def dagbag():
 
     parse_and_sync_to_db(os.devnull, include_examples=True)
     return DagBag(read_dags_from_db=True)
+
+
+@pytest.fixture
+def get_execution_app():
+    def _get_execution_app(test_client):
+        test_app = test_client.app
+        for route in test_app.router.routes:
+            if route.path == "/execution":
+                return route.app
+        raise RuntimeError("Execution app not found at /execution")
+
+    return _get_execution_app

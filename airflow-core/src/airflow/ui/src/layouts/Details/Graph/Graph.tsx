@@ -19,29 +19,21 @@
 import { useToken } from "@chakra-ui/react";
 import { ReactFlow, Controls, Background, MiniMap, type Node as ReactFlowNode } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { useEffect, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useLocalStorage } from "usehooks-ts";
 
-import {
-  useDagRunServiceGetDagRun,
-  useGridServiceGridData,
-  useStructureServiceStructureData,
-} from "openapi/queries";
-import { AliasNode } from "src/components/Graph/AliasNode";
-import { AssetConditionNode } from "src/components/Graph/AssetConditionNode";
-import { AssetNode } from "src/components/Graph/AssetNode";
-import { DagNode } from "src/components/Graph/DagNode";
+import { useStructureServiceStructureData } from "openapi/queries";
 import { DownloadButton } from "src/components/Graph/DownloadButton";
-import Edge from "src/components/Graph/Edge";
-import { JoinNode } from "src/components/Graph/JoinNode";
-import { TaskNode } from "src/components/Graph/TaskNode";
+import { edgeTypes, nodeTypes } from "src/components/Graph/graphTypes";
 import type { CustomNodeProps } from "src/components/Graph/reactflowUtils";
-import { useGraphLayout } from "src/components/Graph/useGraphLayout";
+import { type Direction, useGraphLayout } from "src/components/Graph/useGraphLayout";
 import { useColorMode } from "src/context/colorMode";
 import { useOpenGroups } from "src/context/openGroups";
 import useSelectedVersion from "src/hooks/useSelectedVersion";
+import { flattenGraphNodes } from "src/layouts/Details/Grid/utils.ts";
 import { useDependencyGraph } from "src/queries/useDependencyGraph";
-import { isStatePending, useAutoRefresh } from "src/utils";
+import { useGridTiSummaries } from "src/queries/useGridTISummaries.ts";
 
 const nodeColor = (
   { data: { depth, height, isOpen, taskInstance, width }, type }: ReactFlowNode<CustomNodeProps>,
@@ -65,19 +57,9 @@ const nodeColor = (
   return "";
 };
 
-const nodeTypes = {
-  asset: AssetNode,
-  "asset-alias": AliasNode,
-  "asset-condition": AssetConditionNode,
-  dag: DagNode,
-  join: JoinNode,
-  task: TaskNode,
-};
-const edgeTypes = { custom: Edge };
-
 export const Graph = () => {
   const { colorMode = "light" } = useColorMode();
-  const { dagId = "", runId, taskId } = useParams();
+  const { dagId = "", runId = "", taskId } = useParams();
 
   const selectedVersion = useSelectedVersion();
 
@@ -91,37 +73,42 @@ export const Graph = () => {
     "gray.800",
   ]);
 
-  const { openGroupIds } = useOpenGroups();
-  const refetchInterval = useAutoRefresh({ dagId });
+  const { allGroupIds, openGroupIds, setAllGroupIds } = useOpenGroups();
 
-  const [dependencies] = useLocalStorage<"all" | "immediate" | "tasks">(`dependencies-${dagId}`, "immediate");
+  const [dependencies] = useLocalStorage<"all" | "immediate" | "tasks">(`dependencies-${dagId}`, "tasks");
+  const [direction] = useLocalStorage<Direction>(`direction-${dagId}`, "RIGHT");
 
   const selectedColor = colorMode === "dark" ? selectedDarkColor : selectedLightColor;
+  const { data: graphData = { edges: [], nodes: [] } } = useStructureServiceStructureData(
+    {
+      dagId,
+      externalDependencies: dependencies === "immediate",
+      versionNumber: selectedVersion,
+    },
+    undefined,
+    { enabled: selectedVersion !== undefined },
+  );
 
-  const { data: graphData = { edges: [], nodes: [] } } = useStructureServiceStructureData({
-    dagId,
-    externalDependencies: dependencies === "immediate",
-    versionNumber: selectedVersion,
-  });
+  const { allGroupIds: observedGroupIds } = useMemo(
+    () => flattenGraphNodes(graphData.nodes),
+    [graphData.nodes],
+  );
+
+  useEffect(() => {
+    if (observedGroupIds !== allGroupIds) {
+      setAllGroupIds(observedGroupIds);
+    }
+  }, [allGroupIds, observedGroupIds, setAllGroupIds]);
 
   const { data: dagDependencies = { edges: [], nodes: [] } } = useDependencyGraph(`dag:${dagId}`, {
     enabled: dependencies === "all",
   });
 
-  const { data: dagRun } = useDagRunServiceGetDagRun(
-    {
-      dagId,
-      dagRunId: runId ?? "",
-    },
-    undefined,
-    { enabled: runId !== "" },
-  );
-
   const dagDepEdges = dependencies === "all" ? dagDependencies.edges : [];
   const dagDepNodes = dependencies === "all" ? dagDependencies.nodes : [];
 
   const { data } = useGraphLayout({
-    direction: "RIGHT",
+    direction,
     edges: [...graphData.edges, ...dagDepEdges],
     nodes: dagDepNodes.length
       ? dagDepNodes.map((node) =>
@@ -132,34 +119,17 @@ export const Graph = () => {
     versionNumber: selectedVersion,
   });
 
-  // Filter grid data to get only a single dag run
-  const { data: gridData } = useGridServiceGridData(
-    {
-      dagId,
-      limit: 1,
-      offset: 0,
-      runAfterGte: dagRun?.run_after,
-      runAfterLte: dagRun?.run_after,
-    },
-    undefined,
-    {
-      enabled: dagRun !== undefined,
-      refetchInterval: (query) =>
-        query.state.data?.dag_runs.some((dr) => isStatePending(dr.state)) && refetchInterval,
-    },
-  );
-
-  const gridRun = gridData?.dag_runs.find((dr) => dr.dag_run_id === runId);
+  const { data: gridTISummaries } = useGridTiSummaries({ dagId, runId });
 
   // Add task instances to the node data but without having to recalculate how the graph is laid out
   const nodes = data?.nodes.map((node) => {
-    const taskInstance = gridRun?.task_instances.find((ti) => ti.task_id === node.id);
+    const taskInstance = gridTISummaries?.task_instances.find((ti) => ti.task_id === node.id);
 
     return {
       ...node,
       data: {
         ...node.data,
-        isSelected: node.id === taskId,
+        isSelected: node.id === taskId || node.id === `dag:${dagId}`,
         taskInstance,
       },
     };
@@ -188,7 +158,7 @@ export const Graph = () => {
       edgeTypes={edgeTypes}
       // Fit view to selected task or the whole graph on render
       fitView
-      maxZoom={1}
+      maxZoom={1.5}
       minZoom={0.25}
       nodes={nodes}
       nodesDraggable={false}
@@ -213,7 +183,7 @@ export const Graph = () => {
         style={{ height: 150, width: 200 }}
         zoomable
       />
-      <DownloadButton dagId={dagId} />
+      <DownloadButton name={dagId} />
     </ReactFlow>
   );
 };

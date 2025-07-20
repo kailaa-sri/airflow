@@ -20,20 +20,17 @@ from __future__ import annotations
 import logging
 import re
 from abc import ABCMeta, abstractmethod
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
-
-import methodtools
 
 from airflow.sdk.definitions._internal.mixins import DependencyMixin
 
 if TYPE_CHECKING:
-    from airflow.sdk.definitions._internal.types import Logger
-    from airflow.sdk.definitions.abstractoperator import Operator
     from airflow.sdk.definitions.dag import DAG
     from airflow.sdk.definitions.edges import EdgeModifier
     from airflow.sdk.definitions.taskgroup import TaskGroup
+    from airflow.sdk.types import Operator
     from airflow.serialization.enums import DagAttributeTypes
 
 
@@ -46,12 +43,24 @@ def validate_key(k: str, max_length: int = 250):
     """Validate value used as a key."""
     if not isinstance(k, str):
         raise TypeError(f"The key has to be a string and is {type(k)}:{k}")
-    if len(k) > max_length:
-        raise ValueError(f"The key has to be less than {max_length} characters")
+    if (length := len(k)) > max_length:
+        raise ValueError(f"The key has to be less than {max_length} characters, not {length}")
     if not KEY_REGEX.match(k):
         raise ValueError(
             f"The key {k!r} has to be made of alphanumeric characters, dashes, "
-            "dots and underscores exclusively"
+            f"dots, and underscores exclusively"
+        )
+
+
+def validate_group_key(k: str, max_length: int = 200):
+    """Validate value used as a group key."""
+    if not isinstance(k, str):
+        raise TypeError(f"The key has to be a string and is {type(k)}:{k}")
+    if (length := len(k)) > max_length:
+        raise ValueError(f"The key has to be less than {max_length} characters, not {length}")
+    if not GROUP_KEY_REGEX.match(k):
+        raise ValueError(
+            f"The key {k!r} has to be made of alphanumeric characters, dashes, and underscores exclusively"
         )
 
 
@@ -70,10 +79,17 @@ class DAGNode(DependencyMixin, metaclass=ABCMeta):
     upstream_task_ids: set[str]
     downstream_task_ids: set[str]
 
+    _log_config_logger_name: str | None = None
+    _logger_name: str | None = None
+    _cached_logger: logging.Logger | None = None
+
     def __init__(self):
         self.upstream_task_ids = set()
         self.downstream_task_ids = set()
         super().__init__()
+
+    def get_dag(self) -> DAG | None:
+        return self.dag
 
     @property
     @abstractmethod
@@ -98,12 +114,34 @@ class DAGNode(DependencyMixin, metaclass=ABCMeta):
             return self.dag.dag_id
         return "_in_memory_dag_"
 
-    @methodtools.lru_cache()  # type: ignore[misc]
     @property
-    def log(self) -> Logger:
+    def log(self) -> logging.Logger:
+        """
+        Get a logger for this node.
+
+        The logger name is determined by:
+        1. Using _logger_name if provided
+        2. Otherwise, using the class's module and qualified name
+        3. Prefixing with _log_config_logger_name if set
+        """
+        if self._cached_logger is not None:
+            return self._cached_logger
+
         typ = type(self)
-        name = f"{typ.__module__}.{typ.__qualname__}"
-        return logging.getLogger(name)
+
+        logger_name: str = (
+            self._logger_name if self._logger_name is not None else f"{typ.__module__}.{typ.__qualname__}"
+        )
+
+        if self._log_config_logger_name:
+            logger_name = (
+                f"{self._log_config_logger_name}.{logger_name}"
+                if logger_name
+                else self._log_config_logger_name
+            )
+
+        self._cached_logger = logging.getLogger(logger_name)
+        return self._cached_logger
 
     @property
     @abstractmethod
@@ -122,7 +160,7 @@ class DAGNode(DependencyMixin, metaclass=ABCMeta):
         edge_modifier: EdgeModifier | None = None,
     ) -> None:
         """Set relatives for the task or task list."""
-        from airflow.sdk.definitions.baseoperator import BaseOperator
+        from airflow.sdk.bases.operator import BaseOperator
         from airflow.sdk.definitions.mappedoperator import MappedOperator
 
         if not isinstance(task_or_task_list, Sequence):
@@ -145,7 +183,7 @@ class DAGNode(DependencyMixin, metaclass=ABCMeta):
 
         if len(dags) > 1:
             raise RuntimeError(f"Tried to set relationships between tasks in more than one DAG: {dags}")
-        elif len(dags) == 1:
+        if len(dags) == 1:
             dag = dags.pop()
         else:
             raise ValueError(
@@ -206,15 +244,94 @@ class DAGNode(DependencyMixin, metaclass=ABCMeta):
         """Get set of the direct relative ids to the current task, upstream or downstream."""
         if upstream:
             return self.upstream_task_ids
-        else:
-            return self.downstream_task_ids
+        return self.downstream_task_ids
 
     def get_direct_relatives(self, upstream: bool = False) -> Iterable[Operator]:
         """Get list of the direct relatives to the current task, upstream or downstream."""
         if upstream:
             return self.upstream_list
-        else:
-            return self.downstream_list
+        return self.downstream_list
+
+    def get_flat_relative_ids(self, *, upstream: bool = False) -> set[str]:
+        """
+        Get a flat set of relative IDs, upstream or downstream.
+
+        Will recurse each relative found in the direction specified.
+
+        :param upstream: Whether to look for upstream or downstream relatives.
+        """
+        dag = self.get_dag()
+        if not dag:
+            return set()
+
+        relatives: set[str] = set()
+
+        # This is intentionally implemented as a loop, instead of calling
+        # get_direct_relative_ids() recursively, since Python has significant
+        # limitation on stack level, and a recursive implementation can blow up
+        # if a DAG contains very long routes.
+        task_ids_to_trace = self.get_direct_relative_ids(upstream)
+        while task_ids_to_trace:
+            task_ids_to_trace_next: set[str] = set()
+            for task_id in task_ids_to_trace:
+                if task_id in relatives:
+                    continue
+                task_ids_to_trace_next.update(dag.task_dict[task_id].get_direct_relative_ids(upstream))
+                relatives.add(task_id)
+            task_ids_to_trace = task_ids_to_trace_next
+
+        return relatives
+
+    def get_flat_relatives(self, upstream: bool = False) -> Collection[Operator]:
+        """Get a flat list of relatives, either upstream or downstream."""
+        dag = self.get_dag()
+        if not dag:
+            return set()
+        return [dag.task_dict[task_id] for task_id in self.get_flat_relative_ids(upstream=upstream)]
+
+    def get_upstreams_follow_setups(self) -> Iterable[Operator]:
+        """All upstreams and, for each upstream setup, its respective teardowns."""
+        for task in self.get_flat_relatives(upstream=True):
+            yield task
+            if task.is_setup:
+                for t in task.downstream_list:
+                    if t.is_teardown and t != self:
+                        yield t
+
+    def get_upstreams_only_setups_and_teardowns(self) -> Iterable[Operator]:
+        """
+        Only *relevant* upstream setups and their teardowns.
+
+        This method is meant to be used when we are clearing the task (non-upstream) and we need
+        to add in the *relevant* setups and their teardowns.
+
+        Relevant in this case means, the setup has a teardown that is downstream of ``self``,
+        or the setup has no teardowns.
+        """
+        downstream_teardown_ids = {
+            x.task_id for x in self.get_flat_relatives(upstream=False) if x.is_teardown
+        }
+        for task in self.get_flat_relatives(upstream=True):
+            if not task.is_setup:
+                continue
+            has_no_teardowns = not any(x.is_teardown for x in task.downstream_list)
+            # if task has no teardowns or has teardowns downstream of self
+            if has_no_teardowns or task.downstream_task_ids.intersection(downstream_teardown_ids):
+                yield task
+                for t in task.downstream_list:
+                    if t.is_teardown and t != self:
+                        yield t
+
+    def get_upstreams_only_setups(self) -> Iterable[Operator]:
+        """
+        Return relevant upstream setups.
+
+        This method is meant to be used when we are checking task dependencies where we need
+        to wait for all the upstream setups to complete before we can run the task.
+        """
+        for task in self.get_upstreams_only_setups_and_teardowns():
+            if task.is_setup:
+                yield task
 
     def serialize_for_task_group(self) -> tuple[DagAttributeTypes, Any]:
         """Serialize a task group's content; used by TaskGroupSerialization."""

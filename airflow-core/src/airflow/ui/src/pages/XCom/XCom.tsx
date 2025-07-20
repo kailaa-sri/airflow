@@ -16,23 +16,72 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { Box } from "@chakra-ui/react";
+import { Box, Heading, Link } from "@chakra-ui/react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { Link as RouterLink, useParams } from "react-router-dom";
 
 import { useXcomServiceGetXcomEntries } from "openapi/queries";
 import type { XComResponse } from "openapi/requests/types.gen";
 import { DataTable } from "src/components/DataTable";
 import { useTableURLState } from "src/components/DataTable/useTableUrlState";
 import { ErrorAlert } from "src/components/ErrorAlert";
+import { TruncatedText } from "src/components/TruncatedText";
+import { getTaskInstanceLinkFromObj } from "src/utils/links";
 
 import { XComEntry } from "./XComEntry";
 
-const columns: Array<ColumnDef<XComResponse>> = [
+const columns = (translate: (key: string) => string): Array<ColumnDef<XComResponse>> => [
   {
     accessorKey: "key",
     enableSorting: false,
-    header: "Key",
+    header: translate("xcom.columns.key"),
+  },
+  {
+    accessorKey: "dag_id",
+    cell: ({ row: { original } }) => (
+      <Link asChild color="fg.info" fontWeight="bold">
+        <RouterLink to={`/dags/${original.dag_id}`}>{original.dag_display_name}</RouterLink>
+      </Link>
+    ),
+    enableSorting: false,
+    header: translate("xcom.columns.dag"),
+  },
+  {
+    accessorKey: "run_id",
+    cell: ({ row: { original } }: { row: { original: XComResponse } }) => (
+      <Link asChild color="fg.info" fontWeight="bold">
+        <RouterLink to={`/dags/${original.dag_id}/runs/${original.run_id}`}>
+          <TruncatedText text={original.run_id} />
+        </RouterLink>
+      </Link>
+    ),
+    enableSorting: false,
+    header: translate("common:runId"),
+  },
+  {
+    accessorKey: "task_id",
+    cell: ({ row: { original } }: { row: { original: XComResponse } }) => (
+      <Link asChild color="fg.info" fontWeight="bold">
+        <RouterLink
+          to={getTaskInstanceLinkFromObj({
+            dagId: original.dag_id,
+            dagRunId: original.run_id,
+            mapIndex: original.map_index,
+            taskId: original.task_id,
+          })}
+        >
+          <TruncatedText text={original.task_id} />
+        </RouterLink>
+      </Link>
+    ),
+    enableSorting: false,
+    header: translate("common:taskId"),
+  },
+  {
+    accessorKey: "map_index",
+    enableSorting: false,
+    header: translate("common:mapIndex"),
   },
   {
     cell: ({ row: { original } }) => (
@@ -45,13 +94,13 @@ const columns: Array<ColumnDef<XComResponse>> = [
       />
     ),
     enableSorting: false,
-    header: "Value",
+    header: translate("xcom.columns.value"),
   },
 ];
 
 export const XCom = () => {
   const { dagId = "~", mapIndex = "-1", runId = "~", taskId = "~" } = useParams();
-
+  const { t: translate } = useTranslation(["browse", "common"]);
   const { setTableURLState, tableURLState } = useTableURLState();
   const { pagination } = tableURLState;
 
@@ -70,15 +119,18 @@ export const XCom = () => {
 
   return (
     <Box>
+      {dagId === "~" && runId === "~" && taskId === "~" ? (
+        <Heading size="md">{translate("xcom.title")}</Heading>
+      ) : undefined}
       <ErrorAlert error={error} />
       <DataTable
-        columns={columns}
+        columns={columns(translate)}
         data={data ? data.xcom_entries : []}
         displayMode="table"
         initialState={tableURLState}
         isFetching={isFetching}
         isLoading={isLoading}
-        modelName="XCom"
+        modelName={translate("xcom.title")}
         onStateChange={setTableURLState}
         skeletonCount={undefined}
         total={data ? data.total_entries : 0}

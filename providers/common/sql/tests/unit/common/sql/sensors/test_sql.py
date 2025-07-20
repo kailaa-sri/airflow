@@ -46,7 +46,7 @@ class TestSqlSensor:
         )
 
         with pytest.raises(AirflowException):
-            op.run(start_date=DEFAULT_DATE, end_date=DEFAULT_DATE, ignore_ti_state=True)
+            op.execute({})
 
     @pytest.mark.backend("mysql")
     def test_sql_sensor_mysql(self):
@@ -56,7 +56,7 @@ class TestSqlSensor:
             sql="SELECT count(1) FROM INFORMATION_SCHEMA.TABLES",
             dag=self.dag,
         )
-        op1.run(start_date=DEFAULT_DATE, end_date=DEFAULT_DATE, ignore_ti_state=True)
+        op1.execute({})
 
         op2 = SqlSensor(
             task_id="sql_sensor_check_2",
@@ -65,7 +65,7 @@ class TestSqlSensor:
             parameters=["table_name"],
             dag=self.dag,
         )
-        op2.run(start_date=DEFAULT_DATE, end_date=DEFAULT_DATE, ignore_ti_state=True)
+        op2.execute({})
 
     @pytest.mark.backend("postgres")
     def test_sql_sensor_postgres(self):
@@ -75,7 +75,7 @@ class TestSqlSensor:
             sql="SELECT count(1) FROM INFORMATION_SCHEMA.TABLES",
             dag=self.dag,
         )
-        op1.run(start_date=DEFAULT_DATE, end_date=DEFAULT_DATE, ignore_ti_state=True)
+        op1.execute({})
 
         op2 = SqlSensor(
             task_id="sql_sensor_check_2",
@@ -84,7 +84,7 @@ class TestSqlSensor:
             parameters=["table_name"],
             dag=self.dag,
         )
-        op2.run(start_date=DEFAULT_DATE, end_date=DEFAULT_DATE, ignore_ti_state=True)
+        op2.execute({})
 
     @mock.patch("airflow.providers.common.sql.sensors.sql.BaseHook")
     def test_sql_sensor_postgres_poke(self, mock_hook):
@@ -226,7 +226,7 @@ class TestSqlSensor:
             task_id="sql_sensor_check",
             conn_id="postgres_default",
             sql="SELECT 1",
-            failure=[1],  # type: ignore[arg-type]
+            failure=[1],
         )
 
         mock_hook.get_connection.return_value.get_hook.return_value = mock.MagicMock(spec=DbApiHook)
@@ -246,7 +246,7 @@ class TestSqlSensor:
             task_id="sql_sensor_check",
             conn_id="postgres_default",
             sql="SELECT 1",
-            success=[1],  # type: ignore[arg-type]
+            success=[1],
         )
 
         mock_hook.get_connection.return_value.get_hook.return_value = mock.MagicMock(spec=DbApiHook)
@@ -268,7 +268,7 @@ class TestSqlSensor:
             failure=lambda x: x in [0],
             selector=lambda x: x[1],
         )
-        op1.run(start_date=DEFAULT_DATE, end_date=DEFAULT_DATE, ignore_ti_state=True)
+        op1.execute({})
 
         op2 = SqlSensor(
             task_id="sql_sensor_check_2",

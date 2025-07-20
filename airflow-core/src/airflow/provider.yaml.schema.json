@@ -313,6 +313,30 @@
                 ]
             }
         },
+        "bundles": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "integration-name": {
+                        "type": "string",
+                        "description": "Integration name. It must have a matching item in the 'integration' section of any provider."
+                    },
+                    "python-modules": {
+                        "description": "List of python modules containing the bundles.",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "additionalProperties": false,
+                "required": [
+                    "integration-name",
+                    "python-modules"
+                ]
+            }
+        },
         "connection-types": {
             "type": "array",
             "description": "Array of connection types mapped to hook class names",
@@ -443,6 +467,18 @@
                 }
             }
         },
+        "queues": {
+            "type": "array",
+            "description": "Message Queues exposed by the provider",
+            "items": {
+                "name": {
+                    "type": "string"
+                },
+                "message-queue-class": {
+                    "type": "string"
+                }
+            }
+        },
         "source-date-epoch": {
             "type": "integer",
             "description": "Source date epoch - seconds since epoch (gmtime) when the release documentation was prepared. Used to generate reproducible package builds with flint.",
@@ -451,6 +487,10 @@
             "examples": [
                 1609459200
             ]
+        },
+        "extra-project-metadata": {
+            "type": "string",
+            "description": "Extra project metadata. Added to pyproject.toml."
         }
     },
     "additionalProperties": false,

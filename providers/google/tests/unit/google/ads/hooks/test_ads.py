@@ -21,6 +21,16 @@ from unittest.mock import PropertyMock
 
 import pytest
 
+try:
+    import importlib.util
+
+    if not importlib.util.find_spec("airflow.sdk.bases.hook"):
+        raise ImportError
+
+    BASEHOOK_PATCH_PATH = "airflow.sdk.bases.hook.BaseHook"
+except ImportError:
+    BASEHOOK_PATCH_PATH = "airflow.hooks.base.BaseHook"
+
 from airflow.exceptions import AirflowException
 from airflow.providers.google.ads.hooks.ads import GoogleAdsHook
 
@@ -46,19 +56,8 @@ EXTRAS_DEVELOPER_TOKEN = {
     params=[EXTRAS_DEVELOPER_TOKEN, EXTRAS_SERVICE_ACCOUNT], ids=["developer_token", "service_account"]
 )
 def mock_hook(request):
-    with mock.patch("airflow.hooks.base.BaseHook.get_connection") as conn:
+    with mock.patch(f"{BASEHOOK_PATCH_PATH}.get_connection") as conn:
         hook = GoogleAdsHook(api_version=API_VERSION)
-        conn.return_value.extra_dejson = request.param
-        yield hook
-
-
-@pytest.fixture(
-    params=[EXTRAS_DEVELOPER_TOKEN, EXTRAS_SERVICE_ACCOUNT], ids=["developer_token", "service_account"]
-)
-def mock_hook_v16(request):
-    # TODO: remove this after deprecation removal for page_size parameter
-    with mock.patch("airflow.hooks.base.BaseHook.get_connection") as conn:
-        hook = GoogleAdsHook(api_version="v16")
         conn.return_value.extra_dejson = request.param
         yield hook
 
@@ -72,7 +71,7 @@ def mock_hook_v16(request):
     ids=["developer_token", "service_account", "empty"],
 )
 def mock_hook_for_authentication_method(request):
-    with mock.patch("airflow.hooks.base.BaseHook.get_connection") as conn:
+    with mock.patch(f"{BASEHOOK_PATCH_PATH}.get_connection") as conn:
         hook = GoogleAdsHook(api_version=API_VERSION)
         conn.return_value.extra_dejson = request.param["input"]
         yield hook, request.param["expected_result"]
@@ -111,26 +110,6 @@ class TestGoogleAdsHook:
             assert kwargs["request"]["customer_id"] == client_id
             assert kwargs["request"]["query"] == query
             assert "page_size" not in kwargs["request"]
-
-    # TODO: remove this after deprecation removal for page_size parameter
-    @mock.patch("airflow.providers.google.ads.hooks.ads.GoogleAdsClient")
-    def test_search_v16(self, mock_client, mock_hook_v16):
-        service = mock_client.load_from_dict.return_value.get_service.return_value
-        mock_client.load_from_dict.return_value.get_type.side_effect = [PropertyMock(), PropertyMock()]
-        client_ids = ["1", "2"]
-        rows = ["row1", "row2"]
-        service.search.side_effects = rows
-
-        # Here we mock _extract_rows to assert calls and
-        # avoid additional __iter__ calls
-        mock_hook_v16._extract_rows = list
-        query = "QUERY"
-        mock_hook_v16.search(client_ids=client_ids, query=query, page_size=2)
-        for i, client_id in enumerate(client_ids):
-            name, args, kwargs = service.search.mock_calls[i]
-            assert kwargs["request"]["customer_id"] == client_id
-            assert kwargs["request"]["query"] == query
-            assert kwargs["request"]["page_size"] == 2
 
     def test_extract_rows(self, mock_hook):
         iterators = [[1, 2, 3], [4, 5, 6]]

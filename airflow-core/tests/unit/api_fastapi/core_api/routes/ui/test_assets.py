@@ -46,7 +46,7 @@ class TestNextRunAssets:
         dag_maker.create_dagrun()
         dag_maker.sync_dagbag_to_db()
 
-        response = test_client.get("/ui/next_run_assets/upstream")
+        response = test_client.get("/next_run_assets/upstream")
 
         assert response.status_code == 200
         assert response.json() == {
@@ -62,13 +62,15 @@ class TestNextRunAssets:
                     }
                 ]
             },
-            "events": [{"id": mock.ANY, "uri": "s3://bucket/next-run-asset/1", "lastUpdate": None}],
+            "events": [
+                {"id": mock.ANY, "uri": "s3://bucket/next-run-asset/1", "name": "asset1", "lastUpdate": None}
+            ],
         }
 
     def test_should_respond_401(self, unauthenticated_test_client):
-        response = unauthenticated_test_client.get("/ui/next_run_assets/upstream")
+        response = unauthenticated_test_client.get("/next_run_assets/upstream")
         assert response.status_code == 401
 
     def test_should_respond_403(self, unauthorized_test_client):
-        response = unauthorized_test_client.get("/ui/next_run_assets/upstream")
+        response = unauthorized_test_client.get("/next_run_assets/upstream")
         assert response.status_code == 403

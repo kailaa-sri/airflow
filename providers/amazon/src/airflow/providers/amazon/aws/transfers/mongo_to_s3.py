@@ -23,8 +23,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from bson import json_util
 
-from airflow.models import BaseOperator
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+from airflow.providers.amazon.version_compat import BaseOperator
 from airflow.providers.mongo.hooks.mongo import MongoHook
 
 if TYPE_CHECKING:
@@ -103,7 +103,7 @@ class MongoToS3Operator(BaseOperator):
         if self.is_pipeline:
             results: CommandCursor[Any] | Cursor = MongoHook(self.mongo_conn_id).aggregate(
                 mongo_collection=self.mongo_collection,
-                aggregate_query=cast(list, self.mongo_query),
+                aggregate_query=cast("list", self.mongo_query),
                 mongo_db=self.mongo_db,
                 allowDiskUse=self.allow_disk_use,
             )
@@ -111,7 +111,7 @@ class MongoToS3Operator(BaseOperator):
         else:
             results = MongoHook(self.mongo_conn_id).find(
                 mongo_collection=self.mongo_collection,
-                query=cast(dict, self.mongo_query),
+                query=cast("dict", self.mongo_query),
                 projection=self.mongo_projection,
                 mongo_db=self.mongo_db,
                 find_one=False,

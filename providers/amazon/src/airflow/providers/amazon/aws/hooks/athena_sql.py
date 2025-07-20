@@ -111,7 +111,14 @@ class AthenaSQLHook(AwsBaseHook, DbApiHook):
                 connection.login = athena_conn.login
                 connection.password = athena_conn.password
                 connection.schema = athena_conn.schema
-                connection.set_extra(json.dumps({**athena_conn.extra_dejson, **connection.extra_dejson}))
+                merged_extra = {**athena_conn.extra_dejson, **connection.extra_dejson}
+                try:
+                    extra_json = json.dumps(merged_extra)
+                    connection.extra = extra_json
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        f"Encountered non-JSON in `extra` field for connection {self.aws_conn_id!r}."
+                    )
             except AirflowNotFoundException:
                 connection = athena_conn
                 connection.conn_type = "aws"
@@ -120,7 +127,10 @@ class AthenaSQLHook(AwsBaseHook, DbApiHook):
                 )
 
         return AwsConnectionWrapper(
-            conn=connection, region_name=self._region_name, botocore_config=self._config, verify=self._verify
+            conn=connection,
+            region_name=self._region_name,
+            botocore_config=self._config,
+            verify=self._verify,
         )
 
     @property
@@ -146,10 +156,10 @@ class AthenaSQLHook(AwsBaseHook, DbApiHook):
         creds = self.get_credentials(region_name=conn_params["region_name"])
 
         return URL.create(
-            f'awsathena+{conn_params["driver"]}',
+            f"awsathena+{conn_params['driver']}",
             username=creds.access_key,
             password=creds.secret_key,
-            host=f'athena.{conn_params["region_name"]}.{conn_params["aws_domain"]}',
+            host=f"athena.{conn_params['region_name']}.{conn_params['aws_domain']}",
             port=443,
             database=conn_params["schema_name"],
             query={"aws_session_token": creds.token, **self.conn.extra_dejson},

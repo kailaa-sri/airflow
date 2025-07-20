@@ -44,7 +44,6 @@ from airflow.triggers.base import (
 from airflow.utils import timezone
 from airflow.utils.session import create_session
 from airflow.utils.state import State
-from airflow.utils.xcom import XCOM_RETURN_KEY
 
 from tests_common.test_utils.config import conf_vars
 
@@ -79,9 +78,7 @@ def clear_db(session):
 def test_fetch_trigger_ids_with_asset(session):
     # Create triggers
     trigger1 = Trigger(classpath="airflow.triggers.testing.SuccessTrigger1", kwargs={})
-    trigger1.id = 1
     trigger2 = Trigger(classpath="airflow.triggers.testing.SuccessTrigger2", kwargs={})
-    trigger2.id = 2
     session.add(trigger1)
     session.add(trigger2)
     # Create assets
@@ -91,7 +88,7 @@ def test_fetch_trigger_ids_with_asset(session):
     session.commit()
 
     results = Trigger.fetch_trigger_ids_with_asset()
-    assert results == {1}
+    assert results == {trigger1.id}
 
 
 def test_clean_unused(session, create_task_instance):
@@ -101,15 +98,10 @@ def test_clean_unused(session, create_task_instance):
     """
     # Create triggers
     trigger1 = Trigger(classpath="airflow.triggers.testing.SuccessTrigger1", kwargs={})
-    trigger1.id = 1
     trigger2 = Trigger(classpath="airflow.triggers.testing.SuccessTrigger2", kwargs={})
-    trigger2.id = 2
     trigger3 = Trigger(classpath="airflow.triggers.testing.SuccessTrigger3", kwargs={})
-    trigger3.id = 3
     trigger4 = Trigger(classpath="airflow.triggers.testing.SuccessTrigger4", kwargs={})
-    trigger4.id = 4
     trigger5 = Trigger(classpath="airflow.triggers.testing.SuccessTrigger5", kwargs={})
-    trigger5.id = 5
     session.add(trigger1)
     session.add(trigger2)
     session.add(trigger3)
@@ -124,12 +116,16 @@ def test_clean_unused(session, create_task_instance):
     task_instance.trigger_id = trigger1.id
     session.add(task_instance)
     fake_task1 = EmptyOperator(task_id="fake2", dag=task_instance.task.dag)
-    task_instance1 = TaskInstance(task=fake_task1, run_id=task_instance.run_id)
+    task_instance1 = TaskInstance(
+        task=fake_task1, run_id=task_instance.run_id, dag_version_id=task_instance.dag_version_id
+    )
     task_instance1.state = State.SUCCESS
     task_instance1.trigger_id = trigger2.id
     session.add(task_instance1)
     fake_task2 = EmptyOperator(task_id="fake3", dag=task_instance.task.dag)
-    task_instance2 = TaskInstance(task=fake_task2, run_id=task_instance.run_id)
+    task_instance2 = TaskInstance(
+        task=fake_task2, run_id=task_instance.run_id, dag_version_id=task_instance.dag_version_id
+    )
     task_instance2.state = State.SUCCESS
     task_instance2.trigger_id = trigger4.id
     session.add(task_instance2)
@@ -146,7 +142,7 @@ def test_clean_unused(session, create_task_instance):
     Trigger.clean_unused()
     results = session.query(Trigger).all()
     assert len(results) == 3
-    assert {result.id for result in results} == {1, 4, 5}
+    assert {result.id for result in results} == {trigger1.id, trigger4.id, trigger5.id}
 
 
 def test_submit_event(session, create_task_instance):
@@ -156,19 +152,15 @@ def test_submit_event(session, create_task_instance):
     """
     # Make a trigger
     trigger = Trigger(classpath="airflow.triggers.testing.SuccessTrigger", kwargs={})
-    trigger.id = 1
     session.add(trigger)
-    session.commit()
     # Make a TaskInstance that's deferred and waiting on it
     task_instance = create_task_instance(
         session=session, logical_date=timezone.utcnow(), state=State.DEFERRED
     )
     task_instance.trigger_id = trigger.id
     task_instance.next_kwargs = {"cheesecake": True}
-    session.commit()
     # Create assets
     asset = AssetModel("test")
-    asset.id = 1
     asset.triggers.extend([trigger])
     session.add(asset)
     session.commit()
@@ -187,7 +179,7 @@ def test_submit_event(session, create_task_instance):
     assert session.query(AssetEvent).filter_by(asset_id=asset.id).count() == 1
 
     event = session.query(AssetEvent).filter_by(asset_id=asset.id).first()
-    assert event.extra == {"from_trigger": True}
+    assert event.extra == {"from_trigger": True, "payload": 42}
 
 
 def test_submit_failure(session, create_task_instance):
@@ -197,9 +189,7 @@ def test_submit_failure(session, create_task_instance):
     """
     # Make a trigger
     trigger = Trigger(classpath="airflow.triggers.testing.SuccessTrigger", kwargs={})
-    trigger.id = 1
     session.add(trigger)
-    session.commit()
     # Make a TaskInstance that's deferred and waiting on it
     task_instance = create_task_instance(task_id="fake", logical_date=timezone.utcnow(), state=State.DEFERRED)
     task_instance.trigger_id = trigger.id
@@ -231,9 +221,7 @@ def test_submit_event_task_end(mock_utcnow, session, create_task_instance, event
 
     # Make a trigger
     trigger = Trigger(classpath="does.not.matter", kwargs={})
-    trigger.id = 1
     session.add(trigger)
-    session.commit()
     # Make a TaskInstance that's deferred and waiting on it
     task_instance = create_task_instance(
         session=session, logical_date=timezone.utcnow(), state=State.DEFERRED
@@ -254,7 +242,7 @@ def test_submit_event_task_end(mock_utcnow, session, create_task_instance, event
     # now, for each type, submit event
     # verify that (1) task ends in right state and (2) xcom is pushed
     Trigger.submit_event(
-        trigger.id, event_cls(xcoms={XCOM_RETURN_KEY: "xcomret", "a": "b", "c": "d"}), session=session
+        trigger.id, event_cls(xcoms={"return_value": "xcomret", "a": "b", "c": "d"}), session=session
     )
     # commit changes made by submit event and expire all cache to read from db.
     session.flush()
@@ -271,6 +259,7 @@ def test_submit_event_task_end(mock_utcnow, session, create_task_instance, event
     assert actual_xcoms == expected_xcoms
 
 
+@pytest.mark.need_serialized_dag
 def test_assign_unassigned(session, create_task_instance):
     """
     Tests that unassigned triggers of all appropriate states are assigned.
@@ -303,7 +292,6 @@ def test_assign_unassigned(session, create_task_instance):
     assert not unhealthy_triggerer.is_alive()
     session.commit()
     trigger_on_healthy_triggerer = Trigger(classpath="airflow.triggers.testing.SuccessTrigger", kwargs={})
-    trigger_on_healthy_triggerer.id = 1
     trigger_on_healthy_triggerer.triggerer_id = healthy_triggerer.id
     session.add(trigger_on_healthy_triggerer)
     ti_trigger_on_healthy_triggerer = create_task_instance(
@@ -314,7 +302,6 @@ def test_assign_unassigned(session, create_task_instance):
     ti_trigger_on_healthy_triggerer.trigger_id = trigger_on_healthy_triggerer.id
     session.add(ti_trigger_on_healthy_triggerer)
     trigger_on_unhealthy_triggerer = Trigger(classpath="airflow.triggers.testing.SuccessTrigger", kwargs={})
-    trigger_on_unhealthy_triggerer.id = 2
     trigger_on_unhealthy_triggerer.triggerer_id = unhealthy_triggerer.id
     session.add(trigger_on_unhealthy_triggerer)
     ti_trigger_on_unhealthy_triggerer = create_task_instance(
@@ -325,7 +312,6 @@ def test_assign_unassigned(session, create_task_instance):
     ti_trigger_on_unhealthy_triggerer.trigger_id = trigger_on_unhealthy_triggerer.id
     session.add(ti_trigger_on_unhealthy_triggerer)
     trigger_on_killed_triggerer = Trigger(classpath="airflow.triggers.testing.SuccessTrigger", kwargs={})
-    trigger_on_killed_triggerer.id = 3
     trigger_on_killed_triggerer.triggerer_id = finished_triggerer.id
     session.add(trigger_on_killed_triggerer)
     ti_trigger_on_killed_triggerer = create_task_instance(
@@ -336,7 +322,6 @@ def test_assign_unassigned(session, create_task_instance):
     ti_trigger_on_killed_triggerer.trigger_id = trigger_on_killed_triggerer.id
     session.add(ti_trigger_on_killed_triggerer)
     trigger_unassigned_to_triggerer = Trigger(classpath="airflow.triggers.testing.SuccessTrigger", kwargs={})
-    trigger_unassigned_to_triggerer.id = 4
     session.add(trigger_unassigned_to_triggerer)
     ti_trigger_unassigned_to_triggerer = create_task_instance(
         task_id="ti_trigger_unassigned_to_triggerer",
@@ -371,6 +356,7 @@ def test_assign_unassigned(session, create_task_instance):
     )
 
 
+@pytest.mark.need_serialized_dag
 def test_get_sorted_triggers_same_priority_weight(session, create_task_instance):
     """
     Tests that triggers are sorted by the creation_date if they have the same priority.
@@ -383,7 +369,6 @@ def test_get_sorted_triggers_same_priority_weight(session, create_task_instance)
         kwargs={},
         created_date=old_logical_date + datetime.timedelta(seconds=30),
     )
-    trigger_old.id = 1
     session.add(trigger_old)
     TI_old = create_task_instance(
         task_id="old",
@@ -402,7 +387,6 @@ def test_get_sorted_triggers_same_priority_weight(session, create_task_instance)
         kwargs={},
         created_date=new_logical_date + datetime.timedelta(seconds=30),
     )
-    trigger_new.id = 2
     session.add(trigger_new)
     TI_new = create_task_instance(
         task_id="new",
@@ -417,29 +401,27 @@ def test_get_sorted_triggers_same_priority_weight(session, create_task_instance)
         kwargs={},
         created_date=new_logical_date,
     )
-    trigger_orphan.id = 3
     session.add(trigger_orphan)
     trigger_asset = Trigger(
         classpath="airflow.triggers.testing.TriggerAsset",
         kwargs={},
         created_date=new_logical_date,
     )
-    trigger_asset.id = 4
     session.add(trigger_asset)
     session.commit()
     assert session.query(Trigger).count() == 4
     # Create assets
     asset = AssetModel("test")
-    asset.id = 1
     asset.triggers.extend([trigger_asset])
     session.add(asset)
     session.commit()
 
     trigger_ids_query = Trigger.get_sorted_triggers(capacity=100, alive_triggerer_ids=[], session=session)
 
-    assert trigger_ids_query == [(1,), (2,), (4,)]
+    assert trigger_ids_query == [(trigger_old.id,), (trigger_new.id,), (trigger_asset.id,)]
 
 
+@pytest.mark.need_serialized_dag
 def test_get_sorted_triggers_different_priority_weights(session, create_task_instance):
     """
     Tests that triggers are sorted by the priority_weight.
@@ -452,7 +434,6 @@ def test_get_sorted_triggers_different_priority_weights(session, create_task_ins
         kwargs={},
         created_date=old_logical_date + datetime.timedelta(seconds=30),
     )
-    trigger_old.id = 1
     session.add(trigger_old)
     TI_old = create_task_instance(
         task_id="old",
@@ -471,7 +452,6 @@ def test_get_sorted_triggers_different_priority_weights(session, create_task_ins
         kwargs={},
         created_date=new_logical_date + datetime.timedelta(seconds=30),
     )
-    trigger_new.id = 2
     session.add(trigger_new)
     TI_new = create_task_instance(
         task_id="new",
@@ -487,7 +467,7 @@ def test_get_sorted_triggers_different_priority_weights(session, create_task_ins
 
     trigger_ids_query = Trigger.get_sorted_triggers(capacity=100, alive_triggerer_ids=[], session=session)
 
-    assert trigger_ids_query == [(2,), (1,)]
+    assert trigger_ids_query == [(trigger_new.id,), (trigger_old.id,)]
 
 
 class SensitiveKwargsTrigger(BaseTrigger):

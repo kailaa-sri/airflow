@@ -37,32 +37,37 @@ from requests import exceptions as requests_exceptions
 from airflow.exceptions import AirflowException
 from airflow.providers.databricks.hooks.databricks_base import BaseDatabricksHook
 
-GET_CLUSTER_ENDPOINT = ("GET", "api/2.0/clusters/get")
-RESTART_CLUSTER_ENDPOINT = ("POST", "api/2.0/clusters/restart")
-START_CLUSTER_ENDPOINT = ("POST", "api/2.0/clusters/start")
-TERMINATE_CLUSTER_ENDPOINT = ("POST", "api/2.0/clusters/delete")
+GET_CLUSTER_ENDPOINT = ("GET", "2.0/clusters/get")
+RESTART_CLUSTER_ENDPOINT = ("POST", "2.0/clusters/restart")
+START_CLUSTER_ENDPOINT = ("POST", "2.0/clusters/start")
+TERMINATE_CLUSTER_ENDPOINT = ("POST", "2.0/clusters/delete")
 
-CREATE_ENDPOINT = ("POST", "api/2.1/jobs/create")
-RESET_ENDPOINT = ("POST", "api/2.1/jobs/reset")
-UPDATE_ENDPOINT = ("POST", "api/2.1/jobs/update")
-RUN_NOW_ENDPOINT = ("POST", "api/2.1/jobs/run-now")
-SUBMIT_RUN_ENDPOINT = ("POST", "api/2.1/jobs/runs/submit")
-GET_RUN_ENDPOINT = ("GET", "api/2.1/jobs/runs/get")
-CANCEL_RUN_ENDPOINT = ("POST", "api/2.1/jobs/runs/cancel")
-DELETE_RUN_ENDPOINT = ("POST", "api/2.1/jobs/runs/delete")
-REPAIR_RUN_ENDPOINT = ("POST", "api/2.1/jobs/runs/repair")
-OUTPUT_RUNS_JOB_ENDPOINT = ("GET", "api/2.1/jobs/runs/get-output")
-CANCEL_ALL_RUNS_ENDPOINT = ("POST", "api/2.1/jobs/runs/cancel-all")
+CREATE_ENDPOINT = ("POST", "2.1/jobs/create")
+RESET_ENDPOINT = ("POST", "2.1/jobs/reset")
+UPDATE_ENDPOINT = ("POST", "2.1/jobs/update")
+RUN_NOW_ENDPOINT = ("POST", "2.1/jobs/run-now")
+SUBMIT_RUN_ENDPOINT = ("POST", "2.1/jobs/runs/submit")
+GET_RUN_ENDPOINT = ("GET", "2.1/jobs/runs/get")
+CANCEL_RUN_ENDPOINT = ("POST", "2.1/jobs/runs/cancel")
+DELETE_RUN_ENDPOINT = ("POST", "2.1/jobs/runs/delete")
+REPAIR_RUN_ENDPOINT = ("POST", "2.1/jobs/runs/repair")
+OUTPUT_RUNS_JOB_ENDPOINT = ("GET", "2.1/jobs/runs/get-output")
+CANCEL_ALL_RUNS_ENDPOINT = ("POST", "2.1/jobs/runs/cancel-all")
 
-INSTALL_LIBS_ENDPOINT = ("POST", "api/2.0/libraries/install")
-UNINSTALL_LIBS_ENDPOINT = ("POST", "api/2.0/libraries/uninstall")
+INSTALL_LIBS_ENDPOINT = ("POST", "2.0/libraries/install")
+UNINSTALL_LIBS_ENDPOINT = ("POST", "2.0/libraries/uninstall")
+UPDATE_REPO_ENDPOINT = ("PATCH", "2.0/repos/")
+DELETE_REPO_ENDPOINT = ("DELETE", "2.0/repos/")
+CREATE_REPO_ENDPOINT = ("POST", "2.0/repos")
 
-LIST_JOBS_ENDPOINT = ("GET", "api/2.1/jobs/list")
-LIST_PIPELINES_ENDPOINT = ("GET", "api/2.0/pipelines")
+LIST_JOBS_ENDPOINT = ("GET", "2.1/jobs/list")
+LIST_PIPELINES_ENDPOINT = ("GET", "2.0/pipelines")
+LIST_SQL_ENDPOINTS_ENDPOINT = ("GET", "2.0/sql/endpoints")
 
-WORKSPACE_GET_STATUS_ENDPOINT = ("GET", "api/2.0/workspace/get-status")
+WORKSPACE_GET_STATUS_ENDPOINT = ("GET", "2.0/workspace/get-status")
 
-SPARK_VERSIONS_ENDPOINT = ("GET", "api/2.0/clusters/spark-versions")
+SPARK_VERSIONS_ENDPOINT = ("GET", "2.0/clusters/spark-versions")
+SQL_STATEMENTS_ENDPOINT = "2.0/sql/statements"
 
 
 class RunLifeCycleState(Enum):
@@ -187,6 +192,67 @@ class ClusterState:
     @classmethod
     def from_json(cls, data: str) -> ClusterState:
         return ClusterState(**json.loads(data))
+
+
+class SQLStatementState:
+    """Utility class for the SQL statement state concept of Databricks statements."""
+
+    SQL_STATEMENT_LIFE_CYCLE_STATES = [
+        "PENDING",
+        "RUNNING",
+        "SUCCEEDED",
+        "FAILED",
+        "CANCELED",
+        "CLOSED",
+    ]
+
+    def __init__(
+        self, state: str = "", error_code: str = "", error_message: str = "", *args, **kwargs
+    ) -> None:
+        if state not in self.SQL_STATEMENT_LIFE_CYCLE_STATES:
+            raise AirflowException(
+                f"Unexpected SQL statement life cycle state: {state}: If the state has "
+                "been introduced recently, please check the Databricks user "
+                "guide for troubleshooting information"
+            )
+
+        self.state = state
+        self.error_code = error_code
+        self.error_message = error_message
+
+    @property
+    def is_terminal(self) -> bool:
+        """True if the current state is a terminal state."""
+        return self.state in ("SUCCEEDED", "FAILED", "CANCELED", "CLOSED")
+
+    @property
+    def is_running(self) -> bool:
+        """True if the current state is running."""
+        return self.state in ("PENDING", "RUNNING")
+
+    @property
+    def is_successful(self) -> bool:
+        """True if the state is SUCCEEDED."""
+        return self.state == "SUCCEEDED"
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, SQLStatementState):
+            return NotImplemented
+        return (
+            self.state == other.state
+            and self.error_code == other.error_code
+            and self.error_message == other.error_message
+        )
+
+    def __repr__(self) -> str:
+        return str(self.__dict__)
+
+    def to_json(self) -> str:
+        return json.dumps(self.__dict__)
+
+    @classmethod
+    def from_json(cls, data: str) -> SQLStatementState:
+        return SQLStatementState(**json.loads(data))
 
 
 class DatabricksHook(BaseDatabricksHook):
@@ -322,8 +388,7 @@ class DatabricksHook(BaseDatabricksHook):
 
         if not matching_jobs:
             return None
-        else:
-            return matching_jobs[0]["job_id"]
+        return matching_jobs[0]["job_id"]
 
     def list_pipelines(
         self, batch_size: int = 25, pipeline_name: str | None = None, notebook_path: str | None = None
@@ -383,8 +448,7 @@ class DatabricksHook(BaseDatabricksHook):
 
         if not pipeline_name or len(matching_pipelines) == 0:
             return None
-        else:
-            return matching_pipelines[0]["pipeline_id"]
+        return matching_pipelines[0]["pipeline_id"]
 
     def get_run_page_url(self, run_id: int) -> str:
         """
@@ -578,8 +642,7 @@ class DatabricksHook(BaseDatabricksHook):
         repair_history = response["repair_history"]
         if len(repair_history) == 1:
             return None
-        else:
-            return repair_history[-1]["id"]
+        return repair_history[-1]["id"]
 
     def get_cluster_state(self, cluster_id: str) -> ClusterState:
         """
@@ -659,7 +722,8 @@ class DatabricksHook(BaseDatabricksHook):
         :param json: payload
         :return: metadata from update
         """
-        repos_endpoint = ("PATCH", f"api/2.0/repos/{repo_id}")
+        method, base_path = UPDATE_REPO_ENDPOINT
+        repos_endpoint = (method, f"{base_path}/{repo_id}")
         return self._do_api_call(repos_endpoint, json)
 
     def delete_repo(self, repo_id: str):
@@ -669,7 +733,8 @@ class DatabricksHook(BaseDatabricksHook):
         :param repo_id: ID of Databricks Repos
         :return:
         """
-        repos_endpoint = ("DELETE", f"api/2.0/repos/{repo_id}")
+        method, base_path = DELETE_REPO_ENDPOINT
+        repos_endpoint = (method, f"{base_path}/{repo_id}")
         self._do_api_call(repos_endpoint)
 
     def create_repo(self, json: dict[str, Any]) -> dict:
@@ -679,8 +744,7 @@ class DatabricksHook(BaseDatabricksHook):
         :param json: payload
         :return:
         """
-        repos_endpoint = ("POST", "api/2.0/repos")
-        return self._do_api_call(repos_endpoint, json)
+        return self._do_api_call(CREATE_REPO_ENDPOINT, json)
 
     def get_repo_by_path(self, path: str) -> str | None:
         """
@@ -708,6 +772,54 @@ class DatabricksHook(BaseDatabricksHook):
         :return: json containing permission specification
         """
         return self._do_api_call(("PATCH", f"api/2.0/permissions/jobs/{job_id}"), json)
+
+    def post_sql_statement(self, json: dict[str, Any]) -> str:
+        """
+        Submit a SQL statement to the Databricks SQL Statements endpoint.
+
+        :param json: The data used in the body of the request to the SQL Statements endpoint.
+        :return: The statement_id as a string.
+        """
+        response = self._do_api_call(("POST", f"{SQL_STATEMENTS_ENDPOINT}"), json)
+        return response["statement_id"]
+
+    def get_sql_statement_state(self, statement_id: str) -> SQLStatementState:
+        """
+        Retrieve run state of the SQL statement.
+
+        :param statement_id: ID of the SQL statement.
+        :return: state of the SQL statement.
+        """
+        get_statement_endpoint = ("GET", f"{SQL_STATEMENTS_ENDPOINT}/{statement_id}")
+        response = self._do_api_call(get_statement_endpoint)
+        state = response["status"]["state"]
+        error_code = response["status"].get("error", {}).get("error_code", "")
+        error_message = response["status"].get("error", {}).get("message", "")
+        return SQLStatementState(state, error_code, error_message)
+
+    async def a_get_sql_statement_state(self, statement_id: str) -> SQLStatementState:
+        """
+        Async version of `get_sql_statement_state`.
+
+        :param statement_id: ID of the SQL statement
+        :return: state of the SQL statement
+        """
+        get_sql_statement_endpoint = ("GET", f"{SQL_STATEMENTS_ENDPOINT}/{statement_id}")
+        response = await self._a_do_api_call(get_sql_statement_endpoint)
+        state = response["status"]["state"]
+        error_code = response["status"].get("error", {}).get("error_code", "")
+        error_message = response["status"].get("error", {}).get("message", "")
+        return SQLStatementState(state, error_code, error_message)
+
+    def cancel_sql_statement(self, statement_id: str) -> None:
+        """
+        Cancel the SQL statement.
+
+        :param statement_id: ID of the SQL statement
+        """
+        self.log.info("Canceling SQL statement with ID: %s", statement_id)
+        cancel_sql_statement_endpoint = ("POST", f"{SQL_STATEMENTS_ENDPOINT}/{statement_id}/cancel")
+        self._do_api_call(cancel_sql_statement_endpoint)
 
     def test_connection(self) -> tuple[bool, str]:
         """Test the Databricks connectivity from UI."""

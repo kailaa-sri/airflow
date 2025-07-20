@@ -16,6 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+import { useTranslation } from "react-i18next";
+
 import { useDagServiceGetDagDetails } from "openapi/queries";
 import { toaster } from "src/components/ui";
 
@@ -46,6 +48,7 @@ export type ParamSchema = {
 };
 
 export const useDagParams = (dagId: string, open: boolean) => {
+  const { t: translate } = useTranslation("dag");
   const { data, error }: { data?: Record<string, ParamsSpec>; error?: unknown } = useDagServiceGetDagDetails(
     { dagId },
     undefined,
@@ -58,11 +61,11 @@ export const useDagParams = (dagId: string, open: boolean) => {
     const errorDescription =
       typeof error === "object" && error !== null
         ? JSON.stringify(error, undefined, 2) // Safely stringify the object with pretty-printing
-        : String(error ?? ""); // Convert other types (e.g., numbers, strings) to string
+        : String(Boolean(error) ? error : ""); // Convert other types (e.g., numbers, strings) to string
 
     toaster.create({
-      description: `Dag params request failed. Error: ${errorDescription}`,
-      title: "Getting Dag Params Failed",
+      description: errorDescription,
+      title: translate("paramsFailed"),
       type: "error",
     });
   }

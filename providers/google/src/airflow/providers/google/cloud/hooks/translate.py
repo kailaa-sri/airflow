@@ -311,7 +311,7 @@ class TranslateHook(GoogleBaseHook, OperationHelper):
             retry=retry,
             metadata=metadata,
         )
-        return cast(dict, type(result).to_dict(result))
+        return cast("dict", type(result).to_dict(result))
 
     def batch_translate_text(
         self,
@@ -429,7 +429,7 @@ class TranslateHook(GoogleBaseHook, OperationHelper):
         project_id: str,
         location: str,
         retry: Retry | _MethodDefault = DEFAULT,
-        timeout: float | _MethodDefault = DEFAULT,
+        timeout: float | None | _MethodDefault = DEFAULT,
         metadata: Sequence[tuple[str, str]] = (),
     ) -> automl_translation.Dataset:
         """

@@ -31,6 +31,7 @@ from sqlalchemy import (
     PrimaryKeyConstraint,
     String,
     delete,
+    func,
     select,
     text,
 )
@@ -46,19 +47,15 @@ from airflow.utils.json import XComDecoder, XComEncoder
 from airflow.utils.session import NEW_SESSION, provide_session
 from airflow.utils.sqlalchemy import UtcDateTime
 
-# XCom constants below are needed for providers backward compatibility,
-# which should import the constants directly after apache-airflow>=2.6.0
-from airflow.utils.xcom import (
-    MAX_XCOM_SIZE,  # noqa: F401
-    XCOM_RETURN_KEY,
-)
-
 log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Row
     from sqlalchemy.orm import Session
     from sqlalchemy.sql.expression import Select, TextClause
+
+
+XCOM_RETURN_KEY = "return_value"
 
 
 class XComModel(TaskInstanceDependencies):
@@ -179,6 +176,9 @@ class XComModel(TaskInstanceDependencies):
         """
         from airflow.models.dagrun import DagRun
 
+        if not key:
+            raise ValueError(f"XCom key must be a non-empty string. Received: {key!r}")
+
         if not run_id:
             raise ValueError(f"run_id must be passed. Passed run_id={run_id}")
 
@@ -227,7 +227,7 @@ class XComModel(TaskInstanceDependencies):
             )
         )
 
-        new = cast(Any, cls)(  # Work around Mypy complaining model not defining '__init__'.
+        new = cast("Any", cls)(  # Work around Mypy complaining model not defining '__init__'.
             dag_run_id=dag_run_id,
             key=key,
             value=value,
@@ -277,6 +277,9 @@ class XComModel(TaskInstanceDependencies):
         """
         from airflow.models.dagrun import DagRun
 
+        if key is not None and not key:
+            raise ValueError(f"XCom key must be a non-empty string. Received: {key!r}")
+
         if not run_id:
             raise ValueError(f"run_id must be passed. Passed run_id={run_id}")
 
@@ -303,8 +306,17 @@ class XComModel(TaskInstanceDependencies):
             query = query.filter(cls.map_index == map_indexes)
 
         if include_prior_dates:
-            dr = session.query(DagRun.logical_date).filter(DagRun.run_id == run_id).subquery()
-            query = query.filter(cls.logical_date <= dr.c.logical_date)
+            dr = (
+                session.query(
+                    func.coalesce(DagRun.logical_date, DagRun.run_after).label("logical_date_or_run_after")
+                )
+                .filter(DagRun.run_id == run_id)
+                .subquery()
+            )
+
+            query = query.filter(
+                func.coalesce(DagRun.logical_date, DagRun.run_after) <= dr.c.logical_date_or_run_after
+            )
         else:
             query = query.filter(cls.run_id == run_id)
 
@@ -388,12 +400,16 @@ class LazyXComSelectSequence(LazySelectSequence[Any]):
 
 
 def __getattr__(name: str):
-    if name == "BaseXCom" or name == "XCom":
-        from airflow.sdk.execution_time import xcom
+    if name == "BaseXCom":
+        from airflow.sdk.bases.xcom import BaseXCom
 
-        val = getattr(xcom, name)
+        globals()[name] = BaseXCom
+        return BaseXCom
 
-        globals()[name] = val
-        return val
+    if name == "XCom":
+        from airflow.sdk.execution_time.xcom import XCom
+
+        globals()[name] = XCom
+        return XCom
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

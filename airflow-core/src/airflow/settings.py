@@ -24,8 +24,9 @@ import logging
 import os
 import sys
 import warnings
+from collections.abc import Callable
 from importlib import metadata
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Literal
 
 import pluggy
 from packaging.version import Version
@@ -35,16 +36,17 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.pool import NullPool
 
 from airflow import __version__ as airflow_version, policies
-from airflow.configuration import AIRFLOW_HOME, WEBSERVER_CONFIG, conf  # noqa: F401
+from airflow.configuration import AIRFLOW_HOME, conf
 from airflow.exceptions import AirflowInternalRuntimeError
 from airflow.logging_config import configure_logging
 from airflow.utils.orm_event_handlers import setup_event_handlers
 from airflow.utils.sqlalchemy import is_sqlalchemy_v1
-from airflow.utils.state import State
 from airflow.utils.timezone import local_timezone, parse_timezone, utc
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Engine
+
+    from airflow.api_fastapi.common.types import UIAlert
 
 log = logging.getLogger(__name__)
 
@@ -86,6 +88,7 @@ LOG_FORMAT = conf.get("logging", "log_format")
 SIMPLE_LOG_FORMAT = conf.get("logging", "simple_log_format")
 
 SQL_ALCHEMY_CONN: str | None = None
+SQL_ALCHEMY_CONN_ASYNC: str | None = None
 PLUGINS_FOLDER: str | None = None
 LOGGING_CLASS_PATH: str | None = None
 DONOT_MODIFY_HANDLERS: bool | None = None
@@ -111,22 +114,18 @@ AsyncSession: Callable[..., SAAsyncSession]
 # The JSON library to use for DAG Serialization and De-Serialization
 json = json
 
-# Dictionary containing State and colors associated to each state to
-# display on the Webserver
-STATE_COLORS = {
-    "deferred": "mediumpurple",
-    "failed": "red",
-    "queued": "gray",
-    "removed": "lightgrey",
-    "restarting": "violet",
-    "running": "lime",
-    "scheduled": "tan",
-    "skipped": "hotpink",
-    "success": "green",
-    "up_for_reschedule": "turquoise",
-    "up_for_retry": "gold",
-    "upstream_failed": "orange",
-}
+# Display alerts on the dashboard
+# Useful for warning about setup issues or announcing changes to end users
+# List of UIAlerts, which allows for specifying the content and category
+# message to be shown. For example:
+#   from airflow.api_fastapi.common.types import UIAlert
+#
+#   DASHBOARD_UIALERTS = [
+#       UIAlert(text="Welcome to Airflow", category="info"),
+#       UIAlert(text="Upgrade tomorrow [help](https://www.example.com)", category="warning"), #With markdown support
+#   ]
+#
+DASHBOARD_UIALERTS: list[UIAlert] = []
 
 
 @functools.cache
@@ -167,7 +166,7 @@ def replace_showwarning(replacement):
 original_show_warning = replace_showwarning(custom_show_warning)
 atexit.register(functools.partial(replace_showwarning, original_show_warning))
 
-POLICY_PLUGIN_MANAGER: Any = None  # type: ignore
+POLICY_PLUGIN_MANAGER: Any = None
 
 
 def task_policy(task):
@@ -216,8 +215,7 @@ def _get_async_conn_uri_from_sync(sync_uri):
     aiolib = AIO_LIBS_MAPPING.get(scheme)
     if aiolib:
         return f"{scheme}+{aiolib}:{rest}"
-    else:
-        return sync_uri
+    return sync_uri
 
 
 def configure_vars():
@@ -227,8 +225,12 @@ def configure_vars():
     global DAGS_FOLDER
     global PLUGINS_FOLDER
     global DONOT_MODIFY_HANDLERS
-    SQL_ALCHEMY_CONN = conf.get("database", "SQL_ALCHEMY_CONN")
-    SQL_ALCHEMY_CONN_ASYNC = _get_async_conn_uri_from_sync(sync_uri=SQL_ALCHEMY_CONN)
+
+    SQL_ALCHEMY_CONN = conf.get("database", "sql_alchemy_conn")
+    if conf.has_option("database", "sql_alchemy_conn_async"):
+        SQL_ALCHEMY_CONN_ASYNC = conf.get("database", "sql_alchemy_conn_async")
+    else:
+        SQL_ALCHEMY_CONN_ASYNC = _get_async_conn_uri_from_sync(sync_uri=SQL_ALCHEMY_CONN)
 
     DAGS_FOLDER = os.path.expanduser(conf.get("core", "DAGS_FOLDER"))
 
@@ -323,6 +325,41 @@ def _is_sqlite_db_path_relative(sqla_conn_str: str) -> bool:
     return True
 
 
+def _get_connect_args(mode: Literal["sync", "async"]) -> Any:
+    key = {
+        "sync": "sql_alchemy_connect_args",
+        "async": "sql_alchemy_connect_args_async",
+    }[mode]
+    if conf.has_option("database", key):
+        return conf.getimport("database", key)
+    return {}
+
+
+def _configure_async_session() -> None:
+    """
+    Configure async SQLAlchemy session.
+
+    This exists so tests can reconfigure the session. How SQLAlchemy configures
+    this does not work well with Pytest and you can end up with issues when the
+    session and runs in a different event loop from the test itself.
+    """
+    global AsyncSession
+    global async_engine
+
+    async_engine = create_async_engine(
+        SQL_ALCHEMY_CONN_ASYNC,
+        connect_args=_get_connect_args("async"),
+        future=True,
+    )
+    AsyncSession = sessionmaker(
+        bind=async_engine,
+        autocommit=False,
+        autoflush=False,
+        class_=SAAsyncSession,
+        expire_on_commit=False,
+    )
+
+
 def configure_orm(disable_connection_pool=False, pool_class=None):
     """Configure ORM using SQLAlchemy."""
     from airflow.sdk.execution_time.secrets_masker import mask_secret
@@ -335,11 +372,9 @@ def configure_orm(disable_connection_pool=False, pool_class=None):
             "Please use absolute path such as `sqlite:////tmp/airflow.db`."
         )
 
+    global NonScopedSession
     global Session
     global engine
-    global async_engine
-    global AsyncSession
-    global NonScopedSession
 
     if os.environ.get("_AIRFLOW_SKIP_DB_TESTS") == "true":
         # Skip DB initialization in unit tests, if DB tests are skipped
@@ -349,53 +384,46 @@ def configure_orm(disable_connection_pool=False, pool_class=None):
     log.debug("Setting up DB connection pool (PID %s)", os.getpid())
     engine_args = prepare_engine_args(disable_connection_pool, pool_class)
 
-    if conf.has_option("database", "sql_alchemy_connect_args"):
-        connect_args = conf.getimport("database", "sql_alchemy_connect_args")
-    else:
-        connect_args = {}
-
+    connect_args = _get_connect_args("sync")
     if SQL_ALCHEMY_CONN.startswith("sqlite"):
         # FastAPI runs sync endpoints in a separate thread. SQLite does not allow
         # to use objects created in another threads by default. Allowing that in test
         # to so the `test` thread and the tested endpoints can use common objects.
         connect_args["check_same_thread"] = False
 
-    engine = create_engine(SQL_ALCHEMY_CONN, connect_args=connect_args, **engine_args, future=True)
-    async_engine = create_async_engine(SQL_ALCHEMY_CONN_ASYNC, future=True)
-    AsyncSession = sessionmaker(
-        bind=async_engine,
-        autocommit=False,
-        autoflush=False,
-        class_=SAAsyncSession,
-        expire_on_commit=False,
+    engine = create_engine(
+        SQL_ALCHEMY_CONN,
+        connect_args=connect_args,
+        **engine_args,
+        future=True,
     )
+    _configure_async_session()
     mask_secret(engine.url.password)
-
     setup_event_handlers(engine)
 
     if conf.has_option("database", "sql_alchemy_session_maker"):
         _session_maker = conf.getimport("database", "sql_alchemy_session_maker")
     else:
-
-        def _session_maker(_engine):
-            return sessionmaker(
-                autocommit=False,
-                autoflush=False,
-                bind=_engine,
-                expire_on_commit=False,
-            )
-
+        _session_maker = functools.partial(
+            sessionmaker,
+            autocommit=False,
+            autoflush=False,
+            expire_on_commit=False,
+        )
     NonScopedSession = _session_maker(engine)
     Session = scoped_session(NonScopedSession)
 
-    # https://docs.sqlalchemy.org/en/20/core/pooling.html#using-connection-pools-with-multiprocessing-or-os-fork
-    def clean_in_fork():
-        if engine:
-            engine.dispose(close=False)
-        if async_engine:
-            async_engine.sync_engine.dispose(close=False)
+    if register_at_fork := getattr(os, "register_at_fork", None):
+        # https://docs.sqlalchemy.org/en/20/core/pooling.html#using-connection-pools-with-multiprocessing-or-os-fork
+        def clean_in_fork():
+            _globals = globals()
+            if engine := _globals.get("engine"):
+                engine.dispose(close=False)
+            if async_engine := _globals.get("async_engine"):
+                async_engine.sync_engine.dispose(close=False)
 
-    os.register_at_fork(after_in_child=clean_in_fork)
+        # Won't work on Windows
+        register_at_fork(after_in_child=clean_in_fork)
 
 
 DEFAULT_ENGINE_ARGS = {
@@ -415,7 +443,7 @@ def prepare_engine_args(disable_connection_pool=False, pool_class=None):
             default_args = default.copy()
             break
 
-    engine_args: dict = conf.getjson("database", "sql_alchemy_engine_args", fallback=default_args)  # type: ignore
+    engine_args: dict = conf.getjson("database", "sql_alchemy_engine_args", fallback=default_args)
 
     if pool_class:
         # Don't use separate settings for size etc, only those from sql_alchemy_engine_args
@@ -563,25 +591,6 @@ def prepare_syspath_for_config_and_plugins():
         sys.path.append(PLUGINS_FOLDER)
 
 
-def prepare_syspath_for_dags_folder():
-    """Update sys.path to include the DAGs folder."""
-    if DAGS_FOLDER not in sys.path:
-        sys.path.append(DAGS_FOLDER)
-
-
-def get_session_lifetime_config():
-    """Get session timeout configs and handle outdated configs gracefully."""
-    session_lifetime_minutes = conf.get("webserver", "session_lifetime_minutes", fallback=None)
-    minutes_per_day = 24 * 60
-    if not session_lifetime_minutes:
-        session_lifetime_days = 30
-        session_lifetime_minutes = minutes_per_day * session_lifetime_days
-
-    log.debug("User session lifetime is set to %s minutes.", session_lifetime_minutes)
-
-    return int(session_lifetime_minutes)
-
-
 def import_local_settings():
     """Import airflow_local_settings.py files to allow overriding any configs in settings.py file."""
     try:
@@ -628,16 +637,16 @@ def initialize():
     # in airflow_local_settings to take precendec
     load_policy_plugins(POLICY_PLUGIN_MANAGER)
     import_local_settings()
-    prepare_syspath_for_dags_folder()
     global LOGGING_CLASS_PATH
     LOGGING_CLASS_PATH = configure_logging()
-    State.state_color.update(STATE_COLORS)
 
     configure_adapters()
     # The webservers import this file from models.py with the default settings.
 
     if not os.environ.get("PYTHON_OPERATORS_VIRTUAL_ENV_MODE", None):
-        configure_orm()
+        is_worker = os.environ.get("_AIRFLOW__REEXECUTED_PROCESS") == "1"
+        if not is_worker:
+            configure_orm()
     configure_action_logging()
 
     # mask the sensitive_config_values

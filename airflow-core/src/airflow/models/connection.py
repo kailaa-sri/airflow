@@ -33,9 +33,8 @@ from airflow.configuration import ensure_secrets_loaded
 from airflow.exceptions import AirflowException, AirflowNotFoundException
 from airflow.models.base import ID_LEN, Base
 from airflow.models.crypto import get_fernet
+from airflow.sdk import SecretCache
 from airflow.sdk.execution_time.secrets_masker import mask_secret
-from airflow.secrets.cache import SecretCache
-from airflow.secrets.metastore import MetastoreBackend
 from airflow.utils.helpers import prune_dict
 from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.module_loading import import_string
@@ -45,7 +44,7 @@ log = logging.getLogger(__name__)
 # the symbols #,!,-,_,.,:,\,/ and () requiring at least one match.
 #
 # You can try the regex here: https://regex101.com/r/69033B/1
-RE_SANITIZE_CONN_ID = re.compile(r"^[\w\#\!\(\)\-\.\:\/\\]{1,}$")
+RE_SANITIZE_CONN_ID = re.compile(r"^[\w#!()\-.:/\\]{1,}$")
 # the conn ID max len should be 250
 CONN_ID_MAX_LEN: int = 250
 
@@ -267,11 +266,20 @@ class Connection(Base, LoggingMixin):
 
         if self.host and "://" in self.host:
             protocol, host = self.host.split("://", 1)
+            # If the protocol in host matches the connection type, don't add it again
+            if protocol == self.conn_type:
+                host_to_use = self.host
+                protocol_to_add = None
+            else:
+                # Different protocol, add it to the URI
+                host_to_use = host
+                protocol_to_add = protocol
         else:
-            protocol, host = None, self.host
+            host_to_use = self.host
+            protocol_to_add = None
 
-        if protocol:
-            uri += f"{protocol}://"
+        if protocol_to_add:
+            uri += f"{protocol_to_add}://"
 
         authority_block = ""
         if self.login is not None:
@@ -286,8 +294,8 @@ class Connection(Base, LoggingMixin):
             uri += authority_block
 
         host_block = ""
-        if host:
-            host_block += quote(host, safe="")
+        if host_to_use:
+            host_block += quote(host_to_use, safe="")
 
         if self.port:
             if host_block == "" and authority_block == "":
@@ -322,8 +330,7 @@ class Connection(Base, LoggingMixin):
                     f"FERNET_KEY configuration is missing"
                 )
             return fernet.decrypt(bytes(self._password, "utf-8")).decode()
-        else:
-            return self._password
+        return self._password
 
     def set_password(self, value: str | None):
         """Encrypt password and set in object attribute."""
@@ -353,7 +360,7 @@ class Connection(Base, LoggingMixin):
             self._validate_extra(extra_val, self.conn_id)
         return extra_val
 
-    def set_extra(self, value: str):
+    def set_extra(self, value: str | None):
         """Encrypt extra-data and save in object attribute to object."""
         if value:
             self._validate_extra(value, self.conn_id)
@@ -459,6 +466,30 @@ class Connection(Base, LoggingMixin):
         :param conn_id: connection id
         :return: connection
         """
+        # TODO: This is not the best way of having compat, but it's "better than erroring" for now. This still
+        # means SQLA etc is loaded, but we can't avoid that unless/until we add import shims as a big
+        # back-compat layer
+
+        # If this is set it means are in some kind of execution context (Task, Dag Parse or Triggerer perhaps)
+        # and should use the Task SDK API server path
+        if hasattr(sys.modules.get("airflow.sdk.execution_time.task_runner"), "SUPERVISOR_COMMS"):
+            # TODO: AIP 72: Add deprecation here once we move this module to task sdk.
+            from airflow.sdk import Connection as TaskSDKConnection
+            from airflow.sdk.exceptions import AirflowRuntimeError, ErrorType
+
+            try:
+                conn = TaskSDKConnection.get(conn_id=conn_id)
+                if isinstance(conn, TaskSDKConnection):
+                    if conn.password:
+                        mask_secret(conn.password)
+                    if conn.extra:
+                        mask_secret(conn.extra)
+                return conn
+            except AirflowRuntimeError as e:
+                if e.error.error == ErrorType.CONNECTION_NOT_FOUND:
+                    raise AirflowNotFoundException(f"The conn_id `{conn_id}` isn't defined") from None
+                raise
+
         # check cache first
         # enabled only if SecretCache.init() has been called first
         try:
@@ -469,25 +500,13 @@ class Connection(Base, LoggingMixin):
 
         # iterate over backends if not in cache (or expired)
         for secrets_backend in ensure_secrets_loaded():
-            if isinstance(secrets_backend, MetastoreBackend):
-                # TODO: This is not the best way of having compat, but it's "better than erroring" for now. This still
-                # means SQLA etc is loaded, but we can't avoid that unless/until we add import shims as a big
-                # back-compat layer
-
-                # If this is set it means are in some kind of execution context (Task, Dag Parse or Triggerer perhaps)
-                # and should use the Task SDK API server path
-                if hasattr(sys.modules.get("airflow.sdk.execution_time.task_runner"), "SUPERVISOR_COMMS"):
-                    # TODO: AIP 72: Add deprecation here once we move this module to task sdk.
-                    from airflow.sdk import Connection as TaskSDKConnection
-
-                    return TaskSDKConnection.get(conn_id=conn_id)
             try:
                 conn = secrets_backend.get_connection(conn_id=conn_id)
                 if conn:
                     SecretCache.save_connection_uri(conn_id, conn.get_uri())
                     return conn
             except Exception:
-                log.exception(
+                log.debug(
                     "Unable to retrieve connection from secrets backend (%s). "
                     "Checking subsequent secrets backend.",
                     type(secrets_backend).__name__,

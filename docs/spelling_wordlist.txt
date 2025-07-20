@@ -14,6 +14,7 @@ actionCard
 Acyclic
 acyclic
 adb
+additionalProperties
 AddressesType
 adf
 adhoc
@@ -23,6 +24,7 @@ AdsInsights
 adsinsights
 afterall
 AgentKey
+ai
 aio
 aiobotocore
 AioSession
@@ -31,6 +33,7 @@ Airbnb
 airbnb
 Airbyte
 airbyte
+AirflowConfigParser
 AirflowException
 airflowignore
 ajax
@@ -63,6 +66,7 @@ AnnotateTextResponse
 AnotherExampleDisplayName
 ans
 Ansible
+anyOf
 apache
 api
 apikey
@@ -211,12 +215,14 @@ botocore
 BounceX
 Bq
 bq
+bteq
 bugfix
 bugfixes
 buildType
 burstable
 bytestring
 cacert
+Cadwyn
 callables
 camelCase
 Cancelled
@@ -234,6 +240,7 @@ cdc
 Celect
 celeryd
 celltags
+centric
 cfg
 cgi
 Cgroups
@@ -328,6 +335,7 @@ ContainerPort
 contentUrl
 contextmgr
 contrib
+copyable
 CoreV
 coroutine
 cosmosdb
@@ -368,6 +376,7 @@ Dagbag
 dagbag
 dagbags
 DagCallbackRequest
+dagfile
 DagFileProcessorManager
 dagfolder
 dagmodel
@@ -461,6 +470,7 @@ decrypted
 Decrypts
 dedented
 deduplicate
+deduplicated
 deduplication
 deepcopy
 deepcopying
@@ -474,8 +484,12 @@ delitem
 deltalake
 dep
 DependencyMixin
+deployable
 deploymentUrl
+deprecatedVersion
+deprecationMessage
 Deprecations
+deprecations
 deps
 deques
 deregister
@@ -549,12 +563,14 @@ ds
 dsl
 Dsn
 dsn
+dst
 dts
 dttm
 dtypes
 du
 duckdb
 dunder
+dup
 durations
 dylib
 Dynamodb
@@ -565,6 +581,7 @@ ecb
 ECR
 ecs
 EdDSA
+edgeexecutor
 EdgeModifier
 EdgeModifiers
 EDITMSG
@@ -576,6 +593,7 @@ eksctl
 eladkal
 elasticsearch
 emailer
+embeddings
 emr
 EmrAddSteps
 EmrCreateJobFlow
@@ -599,6 +617,7 @@ Env
 env
 envFrom
 EnvFromSource
+environ
 envs
 EnvVar
 envvar
@@ -622,22 +641,26 @@ evo
 ExaConnection
 Exasol
 exasol
+exc
 executables
 execvp
 exitcode
+expanduser
 explicit
 exportingmultiple
+ext
 extensibility
 externalbrowser
-exts
 faas
 facebook
 Failover
 failover
+fallbacks
 falsy
 faq
 Fargate
 fargate
+FastAPI
 fastapi
 fbee
 fc
@@ -667,6 +690,7 @@ filesystems
 filetype
 finalizers
 findall
+firebase
 Firehose
 Firestore
 firestore
@@ -717,18 +741,21 @@ Gentner
 geq
 getattr
 getboolean
+getcwd
 getfqdn
 getframe
 getint
 getitem
 GetPartitions
 getsource
+getter
 getters
 gevent
 GH
 GiB
 gid
 gif
+GitDagBundle
 Github
 github
 gitignore
@@ -745,9 +772,11 @@ golang
 googleads
 GoogleAdsRow
 googleapiclient
+googleapis
 GoogleDisplayVideo
 gpu
 gpus
+Grafana
 graphviz
 greenlet
 Groupalia
@@ -759,6 +788,7 @@ grpc
 GSoD
 gsuite
 Gunicorn
+gunicorn
 gz
 Gzip
 gzipped
@@ -779,6 +809,7 @@ hdfscli
 hdp
 healthjump
 heartrate
+heatmap
 Highcharts
 hivecmd
 hiveconf
@@ -803,6 +834,7 @@ hotfix
 Hou
 howto
 hql
+href
 html
 htmlcontent
 Http
@@ -820,11 +852,13 @@ hyperparameters
 IaC
 iam
 ibmcloudant
+ideation
 idempotence
 idempotency
 IdP
 ie
 iframe
+iframes
 IGM
 igm
 ignorable
@@ -957,6 +991,7 @@ kerberized
 Kerberos
 kerberos
 KerberosClient
+keycloak
 Keyfile
 keyfile
 KeyManagementServiceClient
@@ -1020,6 +1055,7 @@ ListGenerator
 ListInfoTypesResponse
 ListModelsPager
 ListSecretsPager
+LiteralValue
 Liveness
 liveness
 livy
@@ -1029,6 +1065,7 @@ localexecutor
 localhost
 LocalObjectReference
 localstack
+Lockbox
 lodash
 logfile
 logformat
@@ -1050,6 +1087,7 @@ makedirs
 makedsn
 Makefile
 manualSelector
+mappable
 mapred
 Mapreduce
 mapreduce
@@ -1058,13 +1096,17 @@ MarketingTeam
 MarkupSafe
 Masternode
 masterType
+materializations
 Matomo
 matomo
+MaxCompute
+maxcompute
 Maxime
 MaxRuntimeInSeconds
 mb
 md
 mediawiki
+mem
 memberOf
 memcached
 Memorystore
@@ -1085,6 +1127,7 @@ microservice
 microservices
 microsoft
 middleware
+middlewares
 Midnights
 midnights
 milli
@@ -1099,6 +1142,7 @@ mkdir
 mkdirs
 mkdtemp
 mlengine
+modularity
 moinmoin
 Mongo
 mongo
@@ -1115,6 +1159,7 @@ mssql
 mTLS
 mtls
 muldelete
+multimodal
 Multinamespace
 mutex
 mv
@@ -1135,6 +1180,7 @@ namespaces
 NaN
 nat
 natively
+nav
 navbar
 nd
 ndjson
@@ -1161,8 +1207,10 @@ nodegroups
 nodeName
 nodeSelector
 Nones
+nonnegative
 nonterminal
 noqa
+normalizer
 nosasl
 NotFound
 notificationChannels
@@ -1184,10 +1232,12 @@ objectstorage
 observability
 od
 odbc
+odps
 ok
 Okta
 okta
 onboarded
+onboarding
 OnFailure
 onkill
 Oozie
@@ -1251,6 +1301,7 @@ Pem
 pem
 performant
 permalinks
+permissibility
 persistentVolume
 personalizations
 pformat
@@ -1274,15 +1325,18 @@ pluggable
 pluggy
 plyvel
 png
+PoC
 PodManager
 podName
 PodSpec
 podSpec
 podspec
+polars
 poller
 polyfill
 pooler
 Popen
+positionally
 POSIX
 postfix
 Postgres
@@ -1296,6 +1350,7 @@ pql
 prc
 Pre
 pre
+prebuilt
 precheck
 Precommit
 preconfigured
@@ -1323,6 +1378,7 @@ prestodb
 pretify
 prev
 Proc
+proc
 productionalize
 ProductSearchClient
 profiler
@@ -1412,11 +1468,13 @@ realtime
 rebase
 Rebasing
 Rebrand
+Recency
 recurse
 recurses
 RedactImageResponse
 redbubble
 Reddit
+redelivery
 Redhat
 redis
 rediss
@@ -1428,14 +1486,17 @@ RefreshError
 regexes
 reidentify
 ReidentifyContentResponse
+reimagined
 reinit
 Reinitialising
 reinitialization
 relativedelta
 Remoting
 remoting
+renderer
 renderers
 renewer
+reparse
 replicaSet
 repo
 repos
@@ -1454,6 +1515,7 @@ reStructuredText
 resultset
 resumable
 retransmits
+Reusability
 rfc
 ricard
 rideable
@@ -1461,9 +1523,11 @@ rmse
 rmsle
 rmspe
 Roadmap
+roadmap
 Robinhood
 roc
 RoleBinding
+rom
 romeoandjuliet
 rootcss
 rowid
@@ -1481,6 +1545,7 @@ RunQuerySensor
 runspace
 RunSubmitTaskSettings
 runtime
+runtimes
 SaaS
 sade
 Sagemaker
@@ -1488,6 +1553,7 @@ sagemaker
 salesforce
 samesite
 saml
+sandboxed
 sanitization
 sas
 Sasl
@@ -1577,6 +1643,7 @@ sortable
 sourceArchiveUrl
 sourceRepository
 sourceUploadUrl
+sp
 Spark
 sparkappinfo
 sparkApplication
@@ -1590,6 +1657,7 @@ SparkSQL
 sparksql
 SpeechClient
 spegno
+sphinx_exts
 Splunk
 spotahome
 Sql
@@ -1640,6 +1708,7 @@ StrictUndefined
 Stringified
 stringified
 Struct
+StructuredLogMessage
 STS
 subchart
 subclassed
@@ -1663,6 +1732,7 @@ subnet
 subnets
 subnetwork
 subnetworks
+suboptimal
 subpackage
 Subpackages
 subpackages
@@ -1680,6 +1750,7 @@ subtask
 Subtasks
 subtasks
 subtype
+subtypes
 SuccessResponse
 sudo
 sudoers
@@ -1715,6 +1786,7 @@ taskgroup
 TaskGroups
 taskGroups
 TaskInstance
+taskInstance
 taskinstance
 TaskInstanceKey
 taskinstancekey
@@ -1732,6 +1804,7 @@ templatable
 templateable
 Templated
 templated
+templater
 Templating
 templating
 templatize
@@ -1744,6 +1817,7 @@ teradata
 TeradataConnection
 teradatasql
 Terraform
+testability
 testdata
 testdruid
 textarea
@@ -1760,6 +1834,9 @@ timedeltas
 timeframe
 timespan
 timezones
+TinkerPop
+Tinkerpop
+tinkerpop
 tis
 TLS
 tls
@@ -1836,6 +1913,7 @@ unmap
 unmappable
 unmapped
 unmapping
+unnoticeably
 unpause
 unpaused
 Unpausing
@@ -1845,6 +1923,7 @@ unpredicted
 unprocessable
 unqueued
 unterminated
+untestable
 untransformed
 untrusted
 unutilized
@@ -1882,6 +1961,7 @@ utils
 uuid
 V1JobList
 validator
+validators
 vals
 vCPU
 ve
@@ -1901,6 +1981,7 @@ VideoIntelligenceServiceClient
 views
 virtualenv
 virtualenvs
+virtualized
 vm
 VolumeKmsKeyId
 VolumeMount
@@ -1908,6 +1989,7 @@ volumeMounts
 VolumeSizeInGB
 vpc
 WaiterModel
+walkthrough
 wape
 warmup
 Wasb
@@ -1935,6 +2017,8 @@ winrm
 WIT
 workgroup
 workgroups
+workspaces
+writeable
 wsman
 WTF
 wtf
@@ -1951,6 +2035,7 @@ XComs
 Xero
 Xiaodong
 xml
+xmltodict
 xpath
 xyz
 yaml

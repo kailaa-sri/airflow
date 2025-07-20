@@ -63,7 +63,7 @@ class TestBigQueryDataTransferHook:
             new=mock_base_gcp_hook_no_default_project_id,
         ):
             self.hook = BiqQueryDataTransferServiceHook()
-            self.hook.get_credentials = mock.MagicMock(return_value=CREDENTIALS)  # type: ignore
+            self.hook.get_credentials = mock.MagicMock(return_value=CREDENTIALS)
 
     def test_disable_auto_scheduling(self):
         expected = deepcopy(TRANSFER_CONFIG)
@@ -71,8 +71,7 @@ class TestBigQueryDataTransferHook:
         assert expected == self.hook._disable_auto_scheduling(TRANSFER_CONFIG)
 
     @mock.patch(
-        "airflow.providers.google.cloud.hooks.bigquery_dts."
-        "DataTransferServiceClient.create_transfer_config"
+        "airflow.providers.google.cloud.hooks.bigquery_dts.DataTransferServiceClient.create_transfer_config"
     )
     def test_create_transfer_config(self, service_mock):
         self.hook.create_transfer_config(transfer_config=TRANSFER_CONFIG, project_id=PROJECT_ID)
@@ -87,8 +86,7 @@ class TestBigQueryDataTransferHook:
         )
 
     @mock.patch(
-        "airflow.providers.google.cloud.hooks.bigquery_dts."
-        "DataTransferServiceClient.delete_transfer_config"
+        "airflow.providers.google.cloud.hooks.bigquery_dts.DataTransferServiceClient.delete_transfer_config"
     )
     def test_delete_transfer_config(self, service_mock):
         self.hook.delete_transfer_config(transfer_config_id=TRANSFER_CONFIG_ID, project_id=PROJECT_ID)

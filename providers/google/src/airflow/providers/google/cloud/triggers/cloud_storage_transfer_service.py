@@ -59,7 +59,7 @@ class CloudStorageTransferServiceCreateJobsTrigger(BaseTrigger):
     def serialize(self) -> tuple[str, dict[str, Any]]:
         """Serialize StorageTransferJobsTrigger arguments and classpath."""
         return (
-            f"{self.__class__.__module__ }.{self.__class__.__qualname__}",
+            f"{self.__class__.__module__}.{self.__class__.__qualname__}",
             {
                 "project_id": self.project_id,
                 "job_names": self.job_names,
@@ -68,7 +68,7 @@ class CloudStorageTransferServiceCreateJobsTrigger(BaseTrigger):
             },
         )
 
-    async def run(self) -> AsyncIterator[TriggerEvent]:  # type: ignore[override]
+    async def run(self) -> AsyncIterator[TriggerEvent]:
         """Get current data storage transfer jobs and yields a TriggerEvent."""
         async_hook: CloudDataTransferServiceAsyncHook = self.get_async_hook()
 
@@ -176,7 +176,7 @@ class CloudStorageTransferServiceCheckJobStatusTrigger(BaseTrigger):
     def serialize(self) -> tuple[str, dict[str, Any]]:
         """Serialize CloudStorageTransferServiceCheckJobStatusTrigger arguments and classpath."""
         return (
-            f"{self.__class__.__module__ }.{self.__class__.__qualname__}",
+            f"{self.__class__.__module__}.{self.__class__.__qualname__}",
             {
                 "job_name": self.job_name,
                 "expected_statuses": self.expected_statuses,

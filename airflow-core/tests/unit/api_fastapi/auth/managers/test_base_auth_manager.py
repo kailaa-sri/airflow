@@ -171,6 +171,9 @@ class TestBaseAuthManager:
     def test_get_extra_menu_items_return_empty_list(self, auth_manager):
         assert auth_manager.get_extra_menu_items(user=BaseAuthManagerUserTest(name="test")) == []
 
+    def test_get_db_manager_return_none(self, auth_manager):
+        assert auth_manager.get_db_manager() is None
+
     @patch.object(EmptyAuthManager, "filter_authorized_menu_items")
     def test_get_authorized_menu_items(self, mock_filter_authorized_menu_items, auth_manager):
         user = BaseAuthManagerUserTest(name="test")
@@ -259,70 +262,6 @@ class TestBaseAuthManager:
         assert result == expected
 
     @pytest.mark.parametrize(
-        "return_values, expected",
-        [
-            ([False, False], False),
-            ([True, False], False),
-            ([True, True], True),
-        ],
-    )
-    @patch.object(EmptyAuthManager, "is_authorized_connection")
-    def test_batch_is_authorized_connection(
-        self, mock_is_authorized_connection, auth_manager, return_values, expected
-    ):
-        mock_is_authorized_connection.side_effect = return_values
-        result = auth_manager.batch_is_authorized_connection(
-            [
-                {"method": "GET", "details": ConnectionDetails(conn_id="conn1")},
-                {"method": "GET", "details": ConnectionDetails(conn_id="conn2")},
-            ],
-            user=Mock(),
-        )
-        assert result == expected
-
-    @pytest.mark.parametrize(
-        "return_values, expected",
-        [
-            ([False, False], False),
-            ([True, False], False),
-            ([True, True], True),
-        ],
-    )
-    @patch.object(EmptyAuthManager, "is_authorized_pool")
-    def test_batch_is_authorized_pool(self, mock_is_authorized_pool, auth_manager, return_values, expected):
-        mock_is_authorized_pool.side_effect = return_values
-        result = auth_manager.batch_is_authorized_pool(
-            [
-                {"method": "GET", "details": PoolDetails(name="pool1")},
-                {"method": "GET", "details": PoolDetails(name="pool2")},
-            ],
-            user=Mock(),
-        )
-        assert result == expected
-
-    @pytest.mark.parametrize(
-        "return_values, expected",
-        [
-            ([False, False], False),
-            ([True, False], False),
-            ([True, True], True),
-        ],
-    )
-    @patch.object(EmptyAuthManager, "is_authorized_variable")
-    def test_batch_is_authorized_variable(
-        self, mock_is_authorized_variable, auth_manager, return_values, expected
-    ):
-        mock_is_authorized_variable.side_effect = return_values
-        result = auth_manager.batch_is_authorized_variable(
-            [
-                {"method": "GET", "details": VariableDetails(key="var1")},
-                {"method": "GET", "details": VariableDetails(key="var2")},
-            ],
-            user=Mock(),
-        )
-        assert result == expected
-
-    @pytest.mark.parametrize(
         "access_per_dag, dag_ids, expected",
         [
             # No access to any dag
@@ -349,8 +288,7 @@ class TestBaseAuthManager:
         ):
             if not details:
                 return False
-            else:
-                return access_per_dag.get(details.id, False)
+            return access_per_dag.get(details.id, False)
 
         auth_manager.is_authorized_dag = MagicMock(side_effect=side_effect_func)
         user = Mock()

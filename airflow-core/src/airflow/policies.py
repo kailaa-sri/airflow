@@ -27,9 +27,9 @@ hookimpl = pluggy.HookimplMarker("airflow.policy")
 __all__: list[str] = ["hookimpl"]
 
 if TYPE_CHECKING:
-    from airflow.models.baseoperator import BaseOperator
     from airflow.models.dag import DAG
     from airflow.models.taskinstance import TaskInstance
+    from airflow.serialization.serialized_objects import SerializedBaseOperator as BaseOperator
 
 
 @local_settings_hookspec
@@ -173,7 +173,7 @@ def make_plugin_from_local_settings(pm: pluggy.PluginManager, module, names: set
         codestr = textwrap.dedent(
             f"""
             def {name}_name_mismatch_shim{desired_sig}:
-                return __target({' ,'.join(desired_sig.parameters)})
+                return __target({" ,".join(desired_sig.parameters)})
             """
         )
         code = compile(codestr, "<policy-shim>", "single")

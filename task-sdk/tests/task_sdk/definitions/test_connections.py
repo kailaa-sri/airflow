@@ -18,14 +18,15 @@
 from __future__ import annotations
 
 from unittest import mock
+from urllib.parse import urlparse
 
 import pytest
 
 from airflow.configuration import initialize_secrets_backends
-from airflow.exceptions import AirflowException
+from airflow.exceptions import AirflowException, AirflowNotFoundException
 from airflow.sdk import Connection
-from airflow.sdk.execution_time.comms import ConnectionResult
-from airflow.sdk.execution_time.supervisor import initialize_secrets_backend_on_workers
+from airflow.sdk.exceptions import ErrorType
+from airflow.sdk.execution_time.comms import ConnectionResult, ErrorResponse
 from airflow.secrets import DEFAULT_SECRETS_SEARCH_PATH_WORKERS
 
 from tests_common.test_utils.config import conf_vars
@@ -77,9 +78,34 @@ class TestConnections:
         with pytest.raises(AirflowException, match='Unknown hook type "unknown_type"'):
             conn.get_hook()
 
+    def test_get_uri(self):
+        """Test that get_uri generates the correct URI based on connection attributes."""
+
+        conn = Connection(
+            conn_id="test_conn",
+            conn_type="mysql",
+            host="localhost",
+            login="user",
+            password="password",
+            schema="test_schema",
+            port=3306,
+            extra=None,
+        )
+
+        uri = conn.get_uri()
+        parsed_uri = urlparse(uri)
+
+        assert uri == "mysql://user:password@localhost:3306/test_schema"
+        assert parsed_uri.scheme == "mysql"
+        assert parsed_uri.hostname == "localhost"
+        assert parsed_uri.username == "user"
+        assert parsed_uri.password == "password"
+        assert parsed_uri.port == 3306
+        assert parsed_uri.path.lstrip("/") == "test_schema"
+
     def test_conn_get(self, mock_supervisor_comms):
         conn_result = ConnectionResult(conn_id="mysql_conn", conn_type="mysql", host="mysql", port=3306)
-        mock_supervisor_comms.get_message.return_value = conn_result
+        mock_supervisor_comms.send.return_value = conn_result
 
         conn = Connection.get(conn_id="mysql_conn")
         assert conn is not None
@@ -95,6 +121,13 @@ class TestConnections:
             port=3306,
             extra=None,
         )
+
+    def test_conn_get_not_found(self, mock_supervisor_comms):
+        error_response = ErrorResponse(error=ErrorType.CONNECTION_NOT_FOUND)
+        mock_supervisor_comms.send.return_value = error_response
+
+        with pytest.raises(AirflowNotFoundException, match="The conn_id `mysql_conn` isn't defined"):
+            _ = Connection.get(conn_id="mysql_conn")
 
 
 class TestConnectionsFromSecrets:
@@ -112,7 +145,6 @@ class TestConnectionsFromSecrets:
                 ("workers", "secrets_backend_kwargs"): f'{{"connections_file_path": "{path}"}}',
             }
         ):
-            initialize_secrets_backend_on_workers()
             retrieved_conn = Connection.get(conn_id="CONN_A")
             assert retrieved_conn is not None
             assert retrieved_conn.conn_id == "CONN_A"
@@ -120,7 +152,6 @@ class TestConnectionsFromSecrets:
     @mock.patch("airflow.secrets.environment_variables.EnvironmentVariablesBackend.get_connection")
     def test_get_connection_env_var(self, mock_env_get, mock_supervisor_comms):
         """Tests getting a connection from environment variable."""
-        initialize_secrets_backend_on_workers()
         mock_env_get.return_value = Connection(conn_id="something", conn_type="some-type")  # return None
         Connection.get("something")
         mock_env_get.assert_called_once_with(conn_id="something")
@@ -135,7 +166,6 @@ class TestConnectionsFromSecrets:
     @mock.patch("airflow.secrets.environment_variables.EnvironmentVariablesBackend.get_connection")
     def test_backend_fallback_to_env_var(self, mock_get_connection, mock_env_get, mock_supervisor_comms):
         """Tests if connection retrieval falls back to environment variable backend if not found in secrets backend."""
-        initialize_secrets_backend_on_workers()
         mock_get_connection.return_value = None
         mock_env_get.return_value = Connection(conn_id="something", conn_type="some-type")
 

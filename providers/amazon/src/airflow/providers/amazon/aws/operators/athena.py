@@ -168,7 +168,7 @@ class AthenaOperator(AwsBaseOperator[AthenaHook]):
                 f"Final state of Athena job is {query_status}, query_execution_id is "
                 f"{self.query_execution_id}. Error: {error_message}"
             )
-        elif not query_status or query_status in AthenaHook.INTERMEDIATE_STATES:
+        if not query_status or query_status in AthenaHook.INTERMEDIATE_STATES:
             raise AirflowException(
                 f"Final state of Athena job is {query_status}. Max tries of poll status exceeded, "
                 f"query_execution_id is {self.query_execution_id}."
@@ -239,7 +239,7 @@ class AthenaOperator(AwsBaseOperator[AthenaHook]):
         run_facets: dict[str, BaseFacet] = {}
         if parse_result.errors:
             run_facets["extractionError"] = ExtractionErrorRunFacet(
-                totalTasks=len(self.query) if isinstance(self.query, list) else 1,
+                totalTasks=1,
                 failedTasks=len(parse_result.errors),
                 errors=[
                     Error(

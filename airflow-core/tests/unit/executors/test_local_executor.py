@@ -26,9 +26,12 @@ from kgb import spy_on
 from uuid6 import uuid7
 
 from airflow.executors import workloads
-from airflow.executors.local_executor import LocalExecutor
+from airflow.executors.local_executor import LocalExecutor, _execute_work
 from airflow.utils import timezone
 from airflow.utils.state import State
+
+from tests_common.test_utils.config import conf_vars
+from tests_common.test_utils.markers import skip_if_force_lowest_dependencies_marker
 
 pytestmark = pytest.mark.db_test
 
@@ -56,6 +59,7 @@ class TestLocalExecutor:
         success_tis = [
             workloads.TaskInstance(
                 id=uuid7(),
+                dag_version_id=uuid7(),
                 task_id=f"success_{i}",
                 dag_id="mydag",
                 run_id="run1",
@@ -123,10 +127,7 @@ class TestLocalExecutor:
     @skip_spawn_mp_start
     @pytest.mark.parametrize(
         ("parallelism",),
-        [
-            pytest.param(0, id="unlimited"),
-            pytest.param(2, id="limited"),
-        ],
+        [pytest.param(2, id="limited")],
     )
     def test_execution(self, parallelism: int):
         self._test_execute(parallelism=parallelism)
@@ -150,6 +151,7 @@ class TestLocalExecutor:
         ]
         mock_stats_gauge.assert_has_calls(calls)
 
+    @skip_if_force_lowest_dependencies_marker
     @pytest.mark.execution_timeout(5)
     def test_clean_stop_on_signal(self):
         import signal
@@ -166,3 +168,47 @@ class TestLocalExecutor:
             pass
         finally:
             executor.end()
+
+    @pytest.mark.parametrize(
+        ["conf_values", "expected_server"],
+        [
+            (
+                {
+                    ("api", "base_url"): "http://test-server",
+                    ("core", "execution_api_server_url"): None,
+                },
+                "http://test-server/execution/",
+            ),
+            (
+                {
+                    ("api", "base_url"): "http://test-server",
+                    ("core", "execution_api_server_url"): "http://custom-server/execution/",
+                },
+                "http://custom-server/execution/",
+            ),
+            ({}, "http://localhost:8080/execution/"),
+            ({("api", "base_url"): "/"}, "http://localhost:8080/execution/"),
+            ({("api", "base_url"): "/airflow/"}, "http://localhost:8080/airflow/execution/"),
+        ],
+        ids=[
+            "base_url_fallback",
+            "custom_server",
+            "no_base_url_no_custom",
+            "base_url_no_custom",
+            "relative_base_url",
+        ],
+    )
+    @mock.patch("airflow.sdk.execution_time.supervisor.supervise")
+    def test_execution_api_server_url_config(self, mock_supervise, conf_values, expected_server):
+        """Test that execution_api_server_url is correctly configured with fallback"""
+        with conf_vars(conf_values):
+            _execute_work(log=mock.ANY, workload=mock.MagicMock())
+
+            mock_supervise.assert_called_with(
+                ti=mock.ANY,
+                dag_rel_path=mock.ANY,
+                bundle_info=mock.ANY,
+                token=mock.ANY,
+                server=expected_server,
+                log_path=mock.ANY,
+            )

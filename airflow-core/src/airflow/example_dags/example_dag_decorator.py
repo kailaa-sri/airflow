@@ -17,21 +17,23 @@
 # under the License.
 from __future__ import annotations
 
+# [START dag_decorator_usage]
 from typing import TYPE_CHECKING, Any
 
 import httpx
 import pendulum
 
-from airflow.decorators import dag, task
-from airflow.models.baseoperator import BaseOperator
 from airflow.providers.standard.operators.bash import BashOperator
+from airflow.sdk import BaseOperator, dag, task
 
 if TYPE_CHECKING:
-    from airflow.sdk.definitions.context import Context
+    from airflow.sdk import Context
 
 
 class GetRequestOperator(BaseOperator):
     """Custom operator to send GET request to provided url"""
+
+    template_fields = ("url",)
 
     def __init__(self, *, url: str, **kwargs):
         super().__init__(**kwargs)
@@ -41,7 +43,6 @@ class GetRequestOperator(BaseOperator):
         return httpx.get(self.url).json()
 
 
-# [START dag_decorator_usage]
 @dag(
     schedule=None,
     start_date=pendulum.datetime(2021, 1, 1, tz="UTC"),

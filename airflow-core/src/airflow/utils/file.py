@@ -83,13 +83,11 @@ class _RegexpIgnoreRule(NamedTuple):
 class _GlobIgnoreRule(NamedTuple):
     """Typed namedtuple with utility functions for glob ignore rules."""
 
-    pattern: Pattern
-    raw_pattern: str
-    include: bool | None = None
+    wild_match_pattern: GitWildMatchPattern
     relative_to: Path | None = None
 
     @staticmethod
-    def compile(pattern: str, _, definition_file: Path) -> _IgnoreRule | None:
+    def compile(pattern: str, base_dir: Path, definition_file: Path) -> _IgnoreRule | None:
         """Build an ignore rule from the supplied glob pattern and log a useful warning if it is invalid."""
         relative_to: Path | None = None
         if pattern.strip() == "/":
@@ -102,8 +100,9 @@ class _GlobIgnoreRule(NamedTuple):
             # > pattern is relative to the directory level of the particular .gitignore file itself.
             # > Otherwise the pattern may also match at any level below the .gitignore level.
             relative_to = definition_file.parent
+
         ignore_pattern = GitWildMatchPattern(pattern)
-        return _GlobIgnoreRule(ignore_pattern.regex, pattern, ignore_pattern.include, relative_to)
+        return _GlobIgnoreRule(ignore_pattern, relative_to)
 
     @staticmethod
     def match(path: Path, rules: list[_IgnoreRule]) -> bool:
@@ -114,11 +113,14 @@ class _GlobIgnoreRule(NamedTuple):
                 raise ValueError(f"_GlobIgnoreRule cannot match rules of type: {type(r)}")
             rule: _GlobIgnoreRule = r  # explicit typing to make mypy play nicely
             rel_path = str(path.relative_to(rule.relative_to) if rule.relative_to else path.name)
-            if rule.raw_pattern.endswith("/") and path.is_dir():
-                # ensure the test path will potentially match a directory pattern if it is a directory
-                rel_path += "/"
-            if rule.include is not None and rule.pattern.match(rel_path) is not None:
-                matched = rule.include
+            matched = rule.wild_match_pattern.match_file(rel_path) is not None
+
+            if matched:
+                if not rule.wild_match_pattern.include:
+                    return False
+
+                return matched
+
         return matched
 
 
@@ -143,8 +145,7 @@ def correct_maybe_zipped(fileloc: None | str | Path) -> None | str | Path:
     _, archive, _ = search_.groups()
     if archive and zipfile.is_zipfile(archive):
         return archive
-    else:
-        return fileloc
+    return fileloc
 
 
 def open_maybe_zipped(fileloc, mode="r"):
@@ -159,8 +160,7 @@ def open_maybe_zipped(fileloc, mode="r"):
     _, archive, filename = ZIP_REGEX.search(fileloc).groups()
     if archive and zipfile.is_zipfile(archive):
         return TextIOWrapper(zipfile.ZipFile(archive, mode=mode).open(filename))
-    else:
-        return open(fileloc, mode=mode)
+    return open(fileloc, mode=mode)
 
 
 def _find_path_from_directory(
@@ -186,23 +186,23 @@ def _find_path_from_directory(
         ignore_file_path = Path(root) / ignore_file_name
         if ignore_file_path.is_file():
             with open(ignore_file_path) as ifile:
-                lines_no_comments = [re.sub(r"\s*#.*", "", line) for line in ifile.read().split("\n")]
+                patterns_to_match_excluding_comments = [
+                    re.sub(r"\s*#.*", "", line) for line in ifile.read().split("\n")
+                ]
                 # append new patterns and filter out "None" objects, which are invalid patterns
                 patterns += [
                     p
                     for p in [
-                        ignore_rule_type.compile(line, Path(base_dir_path), ignore_file_path)
-                        for line in lines_no_comments
-                        if line
+                        ignore_rule_type.compile(pattern, Path(base_dir_path), ignore_file_path)
+                        for pattern in patterns_to_match_excluding_comments
+                        if pattern
                     ]
                     if p is not None
                 ]
                 # evaluation order of patterns is important with negation
                 # so that later patterns can override earlier patterns
-                patterns = list(dict.fromkeys(patterns))
 
         dirs[:] = [subdir for subdir in dirs if not ignore_rule_type.match(Path(root) / subdir, patterns)]
-
         # explicit loop for infinite recursion detection since we are following symlinks in this walk
         for sd in dirs:
             dirpath = (Path(root) / sd).resolve()
@@ -236,10 +236,9 @@ def find_path_from_directory(
     """
     if ignore_file_syntax == "glob" or not ignore_file_syntax:
         return _find_path_from_directory(base_dir_path, ignore_file_name, _GlobIgnoreRule)
-    elif ignore_file_syntax == "regexp":
+    if ignore_file_syntax == "regexp":
         return _find_path_from_directory(base_dir_path, ignore_file_name, _RegexpIgnoreRule)
-    else:
-        raise ValueError(f"Unsupported ignore_file_syntax: {ignore_file_syntax}")
+    raise ValueError(f"Unsupported ignore_file_syntax: {ignore_file_syntax}")
 
 
 def list_py_file_paths(

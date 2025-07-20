@@ -212,14 +212,11 @@ class _TemplateWithContext(NamedTuple):
             "appbuilder",
             "base_template",
             "server_timezone",
-            "default_ui_timezone",
             "hostname",
             "navbar_color",
             "navbar_text_color",
             "navbar_hover_color",
             "navbar_text_hover_color",
-            "navbar_logo_text_color",
-            "state_color_mapping",
             "airflow_version",
             "git_version",
             "k8s_or_k8scelery_executor",
@@ -245,11 +242,11 @@ def capture_templates(app):
         def record(sender, template, context, **extra):
             recorded.append(_TemplateWithContext(template, context))
 
-        flask.template_rendered.connect(record, app)  # type: ignore
+        flask.template_rendered.connect(record, app)
         try:
             yield recorded
         finally:
-            flask.template_rendered.disconnect(record, app)  # type: ignore
+            flask.template_rendered.disconnect(record, app)
 
         assert recorded, "Failed to catch the templates"
 

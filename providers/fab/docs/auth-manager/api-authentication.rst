@@ -15,34 +15,25 @@
     specific language governing permissions and limitations
     under the License.
 
-API Authentication
-==================
+FAB auth manager API authentication
+===================================
 
-Authentication for the API is handled separately to the Web Authentication. The default is to
-check the user session:
+.. note::
+    This guide only applies to :doc:`FAB auth manager API </api-ref/fab-public-api-ref>`.
+
+Authentication for the APIs is handled by what is called an authentication backend. The default is to check the user session:
 
 .. code-block:: ini
 
-    [api]
+    [fab]
     auth_backends = airflow.providers.fab.auth_manager.api.auth.backend.session
 
-.. versionchanged:: 1.10.11
-
-    In Airflow <1.10.11, the default setting was to allow all API requests without authentication, but this
-    posed security risks for if the Webserver is publicly accessible.
-
-.. versionchanged:: 2.3.0
-
-    In Airflow <2.3.0 this setting was ``auth_backend`` and allowed only one
-    value. In 2.3.0 it was changed to support multiple backends that are tried
-    in turn.
-
-If you want to check which authentication backends are currently set, you can use ``airflow config get-value api auth_backends``
+If you want to check which authentication backends are currently set, you can use ``airflow config get-value fab auth_backends``
 command as in the example below.
 
 .. code-block:: console
 
-    $ airflow config get-value api auth_backends
+    $ airflow config get-value fab auth_backends
     airflow.providers.fab.auth_manager.api.auth.backend.basic_auth
 
 .. versionchanged:: 3.0.0
@@ -50,30 +41,6 @@ command as in the example below.
     In Airflow, the default setting is using token based authentication.
     This approach is independent from which ``auth_backend`` is used.
     The default setting is using Airflow public API to create a token (JWT) first and use this token in the requests to access the API.
-
-
-JWT Token based authentication
-''''''''''''''''''''''''''''''
-The JWT token based authentication is the default setting for the API.
-To be able to use the Airflow Public API, you need to create a token first and use this token in the requests to access the API.
-
-Endpoints are populated under ``/auth`` path. These endpoints are mounted to the Airflow API.
-You should use your username and password, as seen in the example below.
-The token is valid for seconds defined in ``auth_jwt_expiration_time`` which can be set from ``airflow.cfg``.
-
-Example of creating a token:
-.. code-block:: bash
-
-    curl -X 'POST' \
-      'http://localhost:32784/auth/token' \
-      -H 'accept: application/json' \
-      -H 'Content-Type: application/json' \
-      -d '{
-      "username": "username",
-      "password": "password"
-      }'
-
-This process will return a token that you can use in the requests to access the API.
 
 Kerberos authentication
 '''''''''''''''''''''''
@@ -84,13 +51,13 @@ To enable Kerberos authentication, set the following in the configuration:
 
 .. code-block:: ini
 
-    [api]
+    [fab]
     auth_backends = airflow.providers.fab.auth_manager.api.auth.backend.kerberos_auth
 
     [kerberos]
     keytab = <KEYTAB>
 
-The airflow Kerberos service is configured as ``airflow/fully.qualified.domainname@REALM``. Make sure this
+The Airflow Kerberos service is configured as ``airflow/fully.qualified.domainname@REALM``. Make sure this
 principal exists `in both the Kerberos database as well as in the keytab file </docs/apache-airflow/stable/security/kerberos.html#enabling-kerberos>`_.
 
 You have to make sure to name your users with the kerberos full username/realm in order to make it
@@ -109,7 +76,7 @@ work. This means that your user name should be ``user_name@REALM``.
 
 .. note::
 
-    Remember that the stable API is secured by both authentication and `access control <./access-control.html>`_.
+    Remember that the APIs are secured by both authentication and `access control <./access-control.html>`_.
     This means that your user needs to have a Role with necessary associated permissions, otherwise you'll receive
     a 403 response.
 
@@ -125,7 +92,7 @@ To enable basic authentication, set the following in the configuration:
 
 .. code-block:: ini
 
-    [api]
+    [fab]
     auth_backends = airflow.providers.fab.auth_manager.api.auth.backend.basic_auth
 
 Username and password needs to be base64 encoded and send through the
@@ -162,7 +129,212 @@ and may have one of the following to support API client authorizations used by :
 * function ``create_client_session() -> requests.Session``
 * attribute ``CLIENT_AUTH: tuple[str, str] | requests.auth.AuthBase | None``
 
-After writing your backend module, provide the fully qualified module name in the ``auth_backends`` key in the ``[api]``
+After writing your backend module, provide the fully qualified module name in the ``auth_backends`` key in the ``[fab]``
 section of ``airflow.cfg``.
 
 Additional options to your auth backend can be configured in ``airflow.cfg``, as a new option.
+
+Example using Keycloak authentication
+'''''''''''''''''''''''''''''''''''''
+
+The following example add also ``PKCE`` authentication flow.
+
+You must configure Keycloak accordingly, create ``clientID`` in Keycloak:
+
+.. code-block:: text
+
+    Client ID:                       <airflow-client-id> # Your choice
+    Root URL:                        https://<your-airflow-url.fr>
+    Home URL:
+    Valid redirect URIs:             https://<your-airflow-url.fr>/auth/oauth-authorized/keycloak # with webserver (airflow <3.0) it was https://<your-airflow-url.fr>/oauth-authorized/keycloak
+
+    Valid post logout redirect URIs: https://<your-airflow-url.fr>
+
+    Web origins: +
+    Admin URL: https://<your-airflow-url.fr>
+
+In Capability config, you must select:
+
+.. code-block:: text
+
+    Client authentication   On
+    Authorization           Off
+    Authentication flow     [x] Standard flow                        [x] Direct access grants
+                            [ ] Implicit flow                        [ ] Service accounts roles
+                            [ ] OAuth 2.0 Device Authorization Grant
+                            [ ] OIDC CIBA Grant
+
+In Roles tab, you must create the following roles:
+
+.. code-block:: text
+
+    airflow_admin
+    airflow_op
+    airflow_public
+    airflow_user
+    airflow_viewer
+
+In Advanced tab, section Advanced settings (needed for PKCE flow):
+
+.. code-block:: text
+
+    Proof Key for Code Exchange Code Challenge Method: S256
+
+You must create the following environment variables in your Airflow deployment:
+
+.. code-block:: bash
+
+    export CLIENT_ID=<airflow-client-id>
+    export CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    export OIDC_ISSUER=https://<your-keycloak-url.fr>/auth/realms/<REALM>
+    export AIRFLOW__API__BASE_URL=https://<your-airflow-url.fr>
+
+or create a Secret with these values for your Helm chart:
+
+.. code-block:: bash
+
+    kubectl -n airflow create secret generic airflow-api-keycloak \
+      --from-literal=CLIENT_ID=<airflow-client-id> \
+      --from-literal=CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
+      --from-literal=OIDC_ISSUER=https://<your-keycloak-url.fr>/auth/realms/<REALM> \
+      --from-literal=AIRFLOW__API__BASE_URL=https://<your-airflow-url.fr>
+
+and configure your Helm chart to use this Secret:
+
+.. code-block:: yaml
+
+    apiServer:
+      env:
+        - name: CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: airflow-api-keycloak
+              key: CLIENT_ID
+        - name: CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: airflow-api-keycloak
+              key: CLIENT_SECRET
+        - name: OIDC_ISSUER
+          valueFrom:
+            secretKeyRef:
+              name: airflow-api-keycloak
+              key: OIDC_ISSUER
+        - name: AIRFLOW__API__BASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: airflow-api-keycloak
+              key: AIRFLOW__API__BASE_URL
+
+Here is an example of what you might have in your ``webserver_config.py`` or ``apiServerConfig`` value in Helm chart:
+
+.. code-block:: python
+
+    from airflow.providers.fab.auth_manager.security_manager.override import FabAirflowSecurityManagerOverride
+    from base64 import b64decode
+    from cryptography.hazmat.primitives import serialization
+    from flask import redirect, session
+    from flask_appbuilder import expose
+    from flask_appbuilder.security.manager import AUTH_OAUTH
+    from flask_appbuilder.security.views import AuthOAuthView
+    import jwt
+    import logging
+    import os
+    import requests
+
+    log = logging.getLogger(__name__)
+    CSRF_ENABLED = True
+    AUTH_TYPE = AUTH_OAUTH
+    AUTH_USER_REGISTRATION = True
+    AUTH_ROLES_SYNC_AT_LOGIN = True
+    AUTH_USER_REGISTRATION_ROLE = "Public"
+    PERMANENT_SESSION_LIFETIME = 43200
+
+    # Make sure you create these roles on Keycloak
+    AUTH_ROLES_MAPPING = {
+        "airflow_admin": ["Admin"],
+        "airflow_op": ["Op"],
+        "airflow_public": ["Public"],
+        "airflow_user": ["User"],
+        "airflow_viewer": ["Viewer"],
+    }
+    PROVIDER_NAME = "keycloak"
+    CLIENT_ID = os.getenv("CLIENT_ID")
+    CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+    AIRFLOW__API__BASE_URL = os.getenv("AIRFLOW__API__BASE_URL")
+    OIDC_ISSUER = os.getenv("OIDC_ISSUER")
+    OIDC_BASE_URL = f"{OIDC_ISSUER}/protocol/openid-connect"
+    OIDC_TOKEN_URL = f"{OIDC_BASE_URL}/token"
+    OIDC_AUTH_URL = f"{OIDC_BASE_URL}/auth"
+    OIDC_METADATA_URL = f"{OIDC_ISSUER}/.well-known/openid-configuration"
+    OAUTH_PROVIDERS = [
+        {
+            "name": PROVIDER_NAME,
+            "token_key": "access_token",
+            "icon": "fa-key",
+            "remote_app": {
+                "api_base_url": OIDC_BASE_URL,
+                "access_token_url": OIDC_TOKEN_URL,
+                "authorize_url": OIDC_AUTH_URL,
+                "server_metadata_url": OIDC_METADATA_URL,
+                "request_token_url": None,
+                "client_id": CLIENT_ID,
+                "client_secret": CLIENT_SECRET,
+                "client_kwargs": {
+                    "scope": "email profile",
+                    "code_challenge_method": "S256",  # Needed for PKCE flow
+                    "response_type": "code",  # Needed for PKCE flow
+                },
+            },
+        }
+    ]
+
+    # Fetch public key
+    req = requests.get(OIDC_ISSUER)
+    key_der_base64 = req.json()["public_key"]
+    key_der = b64decode(key_der_base64.encode())
+    public_key = serialization.load_der_public_key(key_der)
+
+
+    class CustomOAuthView(AuthOAuthView):
+        @expose("/logout/", methods=["GET", "POST"])
+        def logout(self):
+            session.clear()
+            return redirect(
+                f"{OIDC_ISSUER}/protocol/openid-connect/logout?post_logout_redirect_uri={AIRFLOW__API__BASE_URL}&client_id={CLIENT_ID}"
+            )
+
+
+    class CustomSecurityManager(FabAirflowSecurityManagerOverride):
+        authoauthview = CustomOAuthView
+
+        def get_oauth_user_info(self, provider, response):
+            if provider == "keycloak":
+                token = response["access_token"]
+                me = jwt.decode(token, public_key, algorithms=["HS256", "RS256"], audience=CLIENT_ID)
+
+                # Extract roles from resource access
+                groups = me.get("resource_access", {}).get(CLIENT_ID, {}).get("roles", [])
+
+                log.info(f"groups: {groups}")
+
+                if not groups:
+                    groups = ["Viewer"]
+
+                userinfo = {
+                    "username": me.get("preferred_username"),
+                    "email": me.get("email"),
+                    "first_name": me.get("given_name"),
+                    "last_name": me.get("family_name"),
+                    "role_keys": groups,
+                }
+
+                log.info(f"user info: {userinfo}")
+
+                return userinfo
+            else:
+                return {}
+
+
+    # Make sure to replace this with your own implementation of AirflowSecurityManager class
+    SECURITY_MANAGER_CLASS = CustomSecurityManager

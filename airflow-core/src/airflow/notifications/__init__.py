@@ -14,3 +14,15 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+"""Airflow Notifiers."""
+
+from __future__ import annotations
+
+from airflow.utils.deprecation_tools import add_deprecated_classes
+
+__deprecated_classes = {
+    "basenotifier": {
+        "BaseNotifier": "airflow.sdk.bases.notifier.BaseNotifier",
+    },
+}
+add_deprecated_classes(__deprecated_classes, __name__)

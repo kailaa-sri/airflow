@@ -97,7 +97,7 @@ class TestBackfillEndpoint:
             dag_model = DagModel(
                 dag_id=f"{dag_id_prefix}_{num}",
                 fileloc=f"/tmp/dag_{num}.py",
-                is_active=True,
+                is_stale=False,
                 timetable_summary="0 0 * * *",
                 is_paused=is_paused,
             )
@@ -114,13 +114,14 @@ class TestListBackfills(TestBackfillEndpoint):
         b = Backfill(dag_id=dag.dag_id, from_date=from_date, to_date=to_date)
         session.add(b)
         session.commit()
-        response = test_client.get(f"/api/v2/backfills?dag_id={dag.dag_id}")
+        response = test_client.get(f"/backfills?dag_id={dag.dag_id}")
         assert response.status_code == 200
         assert response.json() == {
             "backfills": [
                 {
                     "completed_at": mock.ANY,
                     "created_at": mock.ANY,
+                    "dag_display_name": "TEST_DAG_1",
                     "dag_id": "TEST_DAG_1",
                     "dag_run_conf": {},
                     "from_date": to_iso(from_date),
@@ -144,11 +145,12 @@ class TestGetBackfill(TestBackfillEndpoint):
         backfill = Backfill(dag_id=dag.dag_id, from_date=from_date, to_date=to_date)
         session.add(backfill)
         session.commit()
-        response = test_client.get(f"/api/v2/backfills/{backfill.id}")
+        response = test_client.get(f"/backfills/{backfill.id}")
         assert response.status_code == 200
         assert response.json() == {
             "completed_at": mock.ANY,
             "created_at": mock.ANY,
+            "dag_display_name": "TEST_DAG_1",
             "dag_id": "TEST_DAG_1",
             "dag_run_conf": {},
             "from_date": to_iso(from_date),
@@ -161,9 +163,19 @@ class TestGetBackfill(TestBackfillEndpoint):
         }
 
     def test_no_exist(self, session, test_client):
-        response = test_client.get(f"/api/v2/backfills/{231984098}")
+        response = test_client.get(f"/backfills/{231984098}")
         assert response.status_code == 404
         assert response.json().get("detail") == "Backfill not found"
+
+    def test_invalid_id(self, test_client):
+        response = test_client.get("/backfills/invalid_id")
+        assert response.status_code == 422
+        response_detail = response.json()["detail"][0]
+        assert response_detail["input"] == "invalid_id"
+        assert response_detail["loc"] == ["path", "backfill_id"]
+        assert (
+            response_detail["msg"] == "Input should be a valid integer, unable to parse string as an integer"
+        )
 
 
 class TestCreateBackfill(TestBackfillEndpoint):
@@ -197,13 +209,14 @@ class TestCreateBackfill(TestBackfillEndpoint):
         if repro_act is not None:
             data["reprocess_behavior"] = repro_act
         response = test_client.post(
-            url="/api/v2/backfills",
+            url="/backfills",
             json=data,
         )
         assert response.status_code == 200
         assert response.json() == {
             "completed_at": mock.ANY,
             "created_at": mock.ANY,
+            "dag_display_name": "TEST_DAG_1",
             "dag_id": "TEST_DAG_1",
             "dag_run_conf": {"param1": "val1", "param2": True},
             "from_date": from_date_iso,
@@ -234,7 +247,7 @@ class TestCreateBackfill(TestBackfillEndpoint):
             "reprocess_behavior": ReprocessBehavior.NONE,
         }
         response = test_client.post(
-            url="/api/v2/backfills",
+            url="/backfills",
             json=data,
         )
         assert response.status_code == 404
@@ -260,7 +273,7 @@ class TestCreateBackfill(TestBackfillEndpoint):
             "reprocess_behavior": ReprocessBehavior.NONE,
         }
         response = test_client.post(
-            url="/api/v2/backfills",
+            url="/backfills",
             json=data,
         )
         assert response.status_code == 422
@@ -296,7 +309,7 @@ class TestCreateBackfill(TestBackfillEndpoint):
             "reprocess_behavior": repro_act,
         }
         response = test_client.post(
-            url="/api/v2/backfills",
+            url="/backfills",
             json=data,
         )
         assert response.status_code == status_code
@@ -338,7 +351,7 @@ class TestCreateBackfill(TestBackfillEndpoint):
         }
 
         response = test_client.post(
-            url="/api/v2/backfills",
+            url="/backfills",
             json=data,
         )
         assert response.status_code == 422
@@ -369,7 +382,7 @@ class TestCreateBackfill(TestBackfillEndpoint):
         }
 
         response = test_client.post(
-            url="/api/v2/backfills",
+            url="/backfills",
             json=data,
         )
         assert response.status_code == 200
@@ -468,7 +481,7 @@ class TestCreateBackfill(TestBackfillEndpoint):
         }
 
         response = test_client.post(
-            url="/api/v2/backfills",
+            url="/backfills",
             json=data,
         )
 
@@ -531,7 +544,7 @@ class TestCreateBackfill(TestBackfillEndpoint):
             "run_backwards": False,
             "dag_run_conf": {"param1": "val1", "param2": True},
         }
-        response = unauthenticated_test_client.post("/api/v2/backfills", json=data)
+        response = unauthenticated_test_client.post("/backfills", json=data)
         assert response.status_code == 401
 
     def test_should_respond_403(self, unauthorized_test_client, dag_maker, session):
@@ -552,7 +565,7 @@ class TestCreateBackfill(TestBackfillEndpoint):
             "run_backwards": False,
             "dag_run_conf": {"param1": "val1", "param2": True},
         }
-        response = unauthorized_test_client.post("/api/v2/backfills", json=data)
+        response = unauthorized_test_client.post("/backfills", json=data)
         assert response.status_code == 403
 
 
@@ -634,7 +647,7 @@ class TestCreateBackfillDryRun(TestBackfillEndpoint):
         }
 
         response = test_client.post(
-            url="/api/v2/backfills/dry_run",
+            url="/backfills/dry_run",
             json=data,
         )
 
@@ -672,7 +685,7 @@ class TestCreateBackfillDryRun(TestBackfillEndpoint):
             "reprocess_behavior": repro_act,
         }
         response = test_client.post(
-            url="/api/v2/backfills/dry_run",
+            url="/backfills/dry_run",
             json=data,
         )
         assert response.status_code == status_code
@@ -699,12 +712,13 @@ class TestCancelBackfill(TestBackfillEndpoint):
         session.add(backfill)
         session.commit()
         response = test_client.put(
-            f"/api/v2/backfills/{backfill.id}/cancel",
+            f"/backfills/{backfill.id}/cancel",
         )
         assert response.status_code == 200
         assert response.json() == {
             "completed_at": mock.ANY,
             "created_at": mock.ANY,
+            "dag_display_name": "TEST_DAG_1",
             "dag_id": "TEST_DAG_1",
             "dag_run_conf": {},
             "from_date": to_iso(from_date),
@@ -720,7 +734,7 @@ class TestCancelBackfill(TestBackfillEndpoint):
         assert pendulum.parse(response.json()["completed_at"])
 
         # get conflict when canceling already-canceled backfill
-        response = test_client.put(f"/api/v2/backfills/{backfill.id}/cancel")
+        response = test_client.put(f"/backfills/{backfill.id}/cancel")
         assert response.status_code == 409
         check_last_log(session, dag_id=None, event="cancel_backfill", logical_date=None)
 
@@ -738,6 +752,7 @@ class TestCancelBackfill(TestBackfillEndpoint):
             max_active_runs=2,
             reverse=False,
             dag_run_conf={},
+            triggering_user_name="test_user",
         )
         query = (
             select(DagRun)
@@ -752,12 +767,22 @@ class TestCancelBackfill(TestBackfillEndpoint):
         assert all(x.state == DagRunState.QUEUED for x in dag_runs)
         dag_runs[0].state = "running"
         session.commit()
-        response = test_client.put(f"/api/v2/backfills/{b.id}/cancel")
+        response = test_client.put(f"/backfills/{b.id}/cancel")
         assert response.status_code == 200
         session.expunge_all()
         dag_runs = session.scalars(query).all()
         states = [x.state for x in dag_runs]
         assert states == ["running", "failed", "failed", "failed", "failed"]
+
+    def test_invalid_id(self, test_client):
+        response = test_client.put("/backfills/invalid_id/cancel")
+        assert response.status_code == 422
+        response_detail = response.json()["detail"][0]
+        assert response_detail["input"] == "invalid_id"
+        assert response_detail["loc"] == ["path", "backfill_id"]
+        assert (
+            response_detail["msg"] == "Input should be a valid integer, unable to parse string as an integer"
+        )
 
 
 class TestPauseBackfill(TestBackfillEndpoint):
@@ -768,11 +793,12 @@ class TestPauseBackfill(TestBackfillEndpoint):
         backfill = Backfill(dag_id=dag.dag_id, from_date=from_date, to_date=to_date)
         session.add(backfill)
         session.commit()
-        response = test_client.put(f"/api/v2/backfills/{backfill.id}/pause")
+        response = test_client.put(f"/backfills/{backfill.id}/pause")
         assert response.status_code == 200
         assert response.json() == {
             "completed_at": mock.ANY,
             "created_at": mock.ANY,
+            "dag_display_name": "TEST_DAG_1",
             "dag_id": "TEST_DAG_1",
             "dag_run_conf": {},
             "from_date": to_iso(from_date),
@@ -792,7 +818,7 @@ class TestPauseBackfill(TestBackfillEndpoint):
         backfill = Backfill(dag_id=dag.dag_id, from_date=from_date, to_date=to_date)
         session.add(backfill)
         session.commit()
-        response = unauthenticated_test_client.put(f"/api/v2/backfills/{backfill.id}/pause")
+        response = unauthenticated_test_client.put(f"/backfills/{backfill.id}/pause")
         assert response.status_code == 401
 
     def test_pause_backfill_403(self, session, unauthorized_test_client):
@@ -802,8 +828,18 @@ class TestPauseBackfill(TestBackfillEndpoint):
         backfill = Backfill(dag_id=dag.dag_id, from_date=from_date, to_date=to_date)
         session.add(backfill)
         session.commit()
-        response = unauthorized_test_client.put(f"/api/v2/backfills/{backfill.id}/pause")
+        response = unauthorized_test_client.put(f"/backfills/{backfill.id}/pause")
         assert response.status_code == 403
+
+    def test_invalid_id(self, test_client):
+        response = test_client.put("/backfills/invalid_id/pause")
+        assert response.status_code == 422
+        response_detail = response.json()["detail"][0]
+        assert response_detail["input"] == "invalid_id"
+        assert response_detail["loc"] == ["path", "backfill_id"]
+        assert (
+            response_detail["msg"] == "Input should be a valid integer, unable to parse string as an integer"
+        )
 
 
 class TestUnpauseBackfill(TestBackfillEndpoint):
@@ -815,12 +851,13 @@ class TestUnpauseBackfill(TestBackfillEndpoint):
         session.add(backfill)
         session.commit()
 
-        test_client.put(f"/api/v2/backfills/{backfill.id}/pause")
-        response = test_client.put(f"/api/v2/backfills/{backfill.id}/unpause")
+        test_client.put(f"/backfills/{backfill.id}/pause")
+        response = test_client.put(f"/backfills/{backfill.id}/unpause")
         assert response.status_code == 200
         assert response.json() == {
             "completed_at": mock.ANY,
             "created_at": mock.ANY,
+            "dag_display_name": "TEST_DAG_1",
             "dag_id": "TEST_DAG_1",
             "dag_run_conf": {},
             "from_date": to_iso(from_date),
@@ -832,3 +869,13 @@ class TestUnpauseBackfill(TestBackfillEndpoint):
             "updated_at": mock.ANY,
         }
         check_last_log(session, dag_id=None, event="unpause_backfill", logical_date=None)
+
+    def test_invalid_id(self, test_client):
+        response = test_client.put("/backfills/invalid_id/unpause")
+        assert response.status_code == 422
+        response_detail = response.json()["detail"][0]
+        assert response_detail["input"] == "invalid_id"
+        assert response_detail["loc"] == ["path", "backfill_id"]
+        assert (
+            response_detail["msg"] == "Input should be a valid integer, unable to parse string as an integer"
+        )

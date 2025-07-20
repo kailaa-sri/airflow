@@ -17,9 +17,10 @@
 # under the License.
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import cached_property, lru_cache
 from time import sleep
-from typing import TYPE_CHECKING, Callable, NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
 from sqlalchemy import Column, Index, Integer, String, case, select
 from sqlalchemy.exc import OperationalError
@@ -32,7 +33,7 @@ from airflow.executors.executor_loader import ExecutorLoader
 from airflow.listeners.listener import get_listener_manager
 from airflow.models.base import ID_LEN, Base
 from airflow.stats import Stats
-from airflow.traces.tracer import Trace, add_span
+from airflow.traces.tracer import DebugTrace, add_debug_span
 from airflow.utils import timezone
 from airflow.utils.helpers import convert_camel_to_snake
 from airflow.utils.log.logging_mixin import LoggingMixin
@@ -109,6 +110,13 @@ class Job(Base, LoggingMixin):
         backref="creating_job",
     )
 
+    dag_model = relationship(
+        "DagModel",
+        primaryjoin="Job.dag_id == DagModel.dag_id",
+        viewonly=True,
+        foreign_keys=[dag_id],
+    )
+
     """
     TaskInstances which have been enqueued by this Job.
 
@@ -128,7 +136,10 @@ class Job(Base, LoggingMixin):
             self.heartrate = heartrate
         self.unixname = getuser()
         self.max_tis_per_query: int = conf.getint("scheduler", "max_tis_per_query")
-        get_listener_manager().hook.on_starting(component=self)
+        try:
+            get_listener_manager().hook.on_starting(component=self)
+        except Exception:
+            self.log.exception("error calling listener")
         super().__init__(**kwargs)
 
     @property
@@ -197,7 +208,7 @@ class Job(Base, LoggingMixin):
         :param session to use for saving the job
         """
         previous_heartbeat = self.latest_heartbeat
-        with Trace.start_span(span_name="heartbeat", component="Job") as span:
+        with DebugTrace.start_span(span_name="heartbeat", component="Job") as span:
             try:
                 span.set_attribute("heartbeat", str(self.latest_heartbeat))
                 # This will cause it to load from the db
@@ -268,7 +279,10 @@ class Job(Base, LoggingMixin):
 
     @provide_session
     def complete_execution(self, session: Session = NEW_SESSION):
-        get_listener_manager().hook.before_stopping(component=self)
+        try:
+            get_listener_manager().hook.before_stopping(component=self)
+        except Exception:
+            self.log.exception("error calling listener")
         self.end_date = timezone.utcnow()
         session.merge(self)
         session.commit()
@@ -283,12 +297,11 @@ class Job(Base, LoggingMixin):
     def _heartrate(job_type: str) -> float:
         if job_type == "TriggererJob":
             return conf.getfloat("triggerer", "JOB_HEARTBEAT_SEC")
-        elif job_type == "SchedulerJob":
+        if job_type == "SchedulerJob":
             return conf.getfloat("scheduler", "SCHEDULER_HEARTBEAT_SEC")
-        else:
-            # Heartrate used to be hardcoded to scheduler, so in all other
-            # cases continue to use that value for back compat
-            return conf.getfloat("scheduler", "JOB_HEARTBEAT_SEC")
+        # Heartrate used to be hardcoded to scheduler, so in all other
+        # cases continue to use that value for back compat
+        return conf.getfloat("scheduler", "JOB_HEARTBEAT_SEC")
 
     @staticmethod
     def _is_alive(
@@ -380,7 +393,7 @@ def execute_job(job: Job, execute_callable: Callable[[], int | None]) -> int | N
     return ret
 
 
-@add_span
+@add_debug_span
 def perform_heartbeat(
     job: Job, heartbeat_callback: Callable[[Session], None], only_if_necessary: bool
 ) -> None:

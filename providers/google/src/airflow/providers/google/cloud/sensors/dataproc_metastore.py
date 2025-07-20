@@ -23,7 +23,12 @@ from typing import TYPE_CHECKING
 from airflow.exceptions import AirflowException
 from airflow.providers.google.cloud.hooks.dataproc_metastore import DataprocMetastoreHook
 from airflow.providers.google.cloud.hooks.gcs import parse_json_from_gcs
-from airflow.sensors.base import BaseSensorOperator
+from airflow.providers.google.version_compat import AIRFLOW_V_3_0_PLUS
+
+if AIRFLOW_V_3_0_PLUS:
+    from airflow.sdk import BaseSensorOperator
+else:
+    from airflow.sensors.base import BaseSensorOperator  # type: ignore[no-redef]
 
 if TYPE_CHECKING:
     from google.api_core.operation import Operation
@@ -112,7 +117,7 @@ class MetastoreHivePartitionSensor(BaseSensorOperator):
 
         # Extract actual query results
         result_base_uri = result_manifest_uri.rsplit("/", 1)[0]
-        results = (f"{result_base_uri}//{filename}" for filename in manifest.get("filenames", []))
+        results = (f"{result_base_uri}/{filename}" for filename in manifest.get("filenames", []))
         found_partitions = sum(
             len(
                 parse_json_from_gcs(

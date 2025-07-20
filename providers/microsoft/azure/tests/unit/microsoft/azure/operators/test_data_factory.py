@@ -253,7 +253,7 @@ class TestAzureDataFactoryRunPipelineOperator:
         ti.xcom_push(key="run_id", value=PIPELINE_RUN_RESPONSE["run_id"])
 
         if AIRFLOW_V_3_0_PLUS and mock_supervisor_comms:
-            mock_supervisor_comms.get_message.return_value = XComResult(
+            mock_supervisor_comms.send.return_value = XComResult(
                 key="run_id",
                 value=PIPELINE_RUN_RESPONSE["run_id"],
             )
@@ -319,6 +319,8 @@ class TestAzureDataFactoryRunPipelineOperatorWithDeferrable:
         return dag_run
 
     def get_task_instance(self, task: BaseOperator) -> TaskInstance:
+        if AIRFLOW_V_3_0_PLUS:
+            return TaskInstance(task, run_id=timezone.datetime(2022, 1, 1), dag_version_id=mock.MagicMock())
         return TaskInstance(task, timezone.datetime(2022, 1, 1))
 
     def get_conn(
@@ -348,8 +350,10 @@ class TestAzureDataFactoryRunPipelineOperatorWithDeferrable:
                 execution_date=logical_date,
                 run_id=DagRun.generate_run_id(DagRunType.MANUAL, logical_date),
             )
-
-        task_instance = TaskInstance(task=task)
+        if AIRFLOW_V_3_0_PLUS:
+            task_instance = TaskInstance(task=task, dag_version_id=mock.MagicMock())
+        else:
+            task_instance = TaskInstance(task=task)
         task_instance.dag_run = dag_run
         task_instance.xcom_push = mock.Mock()
         date_key = "logical_date" if AIRFLOW_V_3_0_PLUS else "execution_date"
@@ -367,8 +371,7 @@ class TestAzureDataFactoryRunPipelineOperatorWithDeferrable:
 
     @pytest.mark.db_test
     @mock.patch(
-        "airflow.providers.microsoft.azure.operators.data_factory.AzureDataFactoryRunPipelineOperator"
-        ".defer"
+        "airflow.providers.microsoft.azure.operators.data_factory.AzureDataFactoryRunPipelineOperator.defer"
     )
     @mock.patch(
         "airflow.providers.microsoft.azure.hooks.data_factory.AzureDataFactoryHook.get_pipeline_run_status",
@@ -390,8 +393,7 @@ class TestAzureDataFactoryRunPipelineOperatorWithDeferrable:
     @pytest.mark.db_test
     @pytest.mark.parametrize("status", sorted(AzureDataFactoryPipelineRunStatus.FAILURE_STATES))
     @mock.patch(
-        "airflow.providers.microsoft.azure.operators.data_factory.AzureDataFactoryRunPipelineOperator"
-        ".defer"
+        "airflow.providers.microsoft.azure.operators.data_factory.AzureDataFactoryRunPipelineOperator.defer"
     )
     @mock.patch(
         "airflow.providers.microsoft.azure.hooks.data_factory.AzureDataFactoryHook.get_pipeline_run_status",
@@ -430,9 +432,9 @@ class TestAzureDataFactoryRunPipelineOperatorWithDeferrable:
         with pytest.raises(TaskDeferred) as exc:
             self.ti.task.execute(context=self.create_context(self.ti.task))
 
-        assert isinstance(
-            exc.value.trigger, AzureDataFactoryTrigger
-        ), "Trigger is not a AzureDataFactoryTrigger"
+        assert isinstance(exc.value.trigger, AzureDataFactoryTrigger), (
+            "Trigger is not a AzureDataFactoryTrigger"
+        )
 
     @pytest.mark.db_test
     def test_azure_data_factory_run_pipeline_operator_async_execute_complete_success(self):

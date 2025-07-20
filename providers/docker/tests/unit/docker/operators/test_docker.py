@@ -473,9 +473,9 @@ class TestDockerOperator:
         operator = DockerOperator(
             private_environment={"PRIVATE": "MESSAGE"}, image=TEST_IMAGE, task_id="unittest"
         )
-        assert operator._private_environment == {
-            "PRIVATE": "MESSAGE"
-        }, "To keep this private, it must be an underscored attribute."
+        assert operator._private_environment == {"PRIVATE": "MESSAGE"}, (
+            "To keep this private, it must be an underscored attribute."
+        )
 
     @mock.patch("airflow.providers.docker.operators.docker.StringIO")
     def test_environment_overrides_env_file(self, stringio_mock):
@@ -790,7 +790,26 @@ class TestDockerOperator:
     @pytest.mark.parametrize("labels", ({"key": "value"}, ["key=value"]))
     def test_labels(self, labels: dict[str, str] | list[str]):
         operator = DockerOperator(task_id="test", image="test", labels=labels)
-        operator.execute(None)
+        operator.execute({})
         self.client_mock.create_container.assert_called_once()
         assert "labels" in self.client_mock.create_container.call_args.kwargs
         assert labels == self.client_mock.create_container.call_args.kwargs["labels"]
+
+    @pytest.mark.db_test
+    def test_basic_docker_operator_with_template_fields(self, dag_maker):
+        from docker.types import Mount
+
+        with dag_maker():
+            operator = DockerOperator(
+                task_id="test",
+                image="test",
+                container_name="python_{{dag_run.dag_id}}",
+                mounts=[Mount(source="workspace", target="/{{task_instance.run_id}}")],
+            )
+            operator.execute({})
+
+        dr = dag_maker.create_dagrun()
+        ti = dr.task_instances[0]
+        rendered = ti.render_templates()
+        assert rendered.container_name == f"python_{dr.dag_id}"
+        assert rendered.mounts[0]["Target"] == f"/{ti.run_id}"

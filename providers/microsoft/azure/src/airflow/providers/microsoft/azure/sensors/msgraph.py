@@ -17,22 +17,25 @@
 # under the License.
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any
 
 from airflow.exceptions import AirflowException
 from airflow.providers.common.compat.standard.triggers import TimeDeltaTrigger
 from airflow.providers.microsoft.azure.hooks.msgraph import KiotaRequestAdapterHook
 from airflow.providers.microsoft.azure.operators.msgraph import execute_callable
 from airflow.providers.microsoft.azure.triggers.msgraph import MSGraphTrigger, ResponseSerializer
-from airflow.sensors.base import BaseSensorOperator
+from airflow.providers.microsoft.azure.version_compat import AIRFLOW_V_3_0_PLUS
+
+if AIRFLOW_V_3_0_PLUS:
+    from airflow.sdk import BaseSensorOperator
+else:
+    from airflow.sensors.base import BaseSensorOperator  # type: ignore[no-redef]
 
 if TYPE_CHECKING:
     from datetime import timedelta
     from io import BytesIO
 
-    from kiota_abstractions.request_information import QueryParams
-    from kiota_http.httpx_request_adapter import ResponseType
     from msgraph_core import APIVersion
 
     from airflow.utils.context import Context
@@ -76,11 +79,11 @@ class MSGraphSensor(BaseSensorOperator):
     def __init__(
         self,
         url: str,
-        response_type: ResponseType | None = None,
+        response_type: str | None = None,
         path_parameters: dict[str, Any] | None = None,
         url_template: str | None = None,
         method: str = "GET",
-        query_parameters: dict[str, QueryParams] | None = None,
+        query_parameters: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         data: dict[str, Any] | str | BytesIO | None = None,
         conn_id: str = KiotaRequestAdapterHook.default_conn_name,

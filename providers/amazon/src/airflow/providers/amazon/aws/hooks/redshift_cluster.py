@@ -67,7 +67,7 @@ class RedshiftHook(AwsBaseHook):
             for the cluster that is being created.
         :param params: Remaining AWS Create cluster API params.
         """
-        response = self.get_conn().create_cluster(
+        response = self.conn.create_cluster(
             ClusterIdentifier=cluster_identifier,
             NodeType=node_type,
             MasterUsername=master_username,
@@ -77,7 +77,7 @@ class RedshiftHook(AwsBaseHook):
         return response
 
     # TODO: Wrap create_cluster_snapshot
-    def cluster_status(self, cluster_identifier: str) -> str:
+    def cluster_status(self, cluster_identifier: str) -> str | None:
         """
         Get status of a cluster.
 
@@ -87,12 +87,12 @@ class RedshiftHook(AwsBaseHook):
         :param cluster_identifier: unique identifier of a cluster
         """
         try:
-            response = self.get_conn().describe_clusters(ClusterIdentifier=cluster_identifier)["Clusters"]
+            response = self.conn.describe_clusters(ClusterIdentifier=cluster_identifier)["Clusters"]
             return response[0]["ClusterStatus"] if response else None
-        except self.get_conn().exceptions.ClusterNotFoundFault:
+        except self.conn.exceptions.ClusterNotFoundFault:
             return "cluster_not_found"
 
-    async def cluster_status_async(self, cluster_identifier: str) -> str:
+    async def cluster_status_async(self, cluster_identifier: str) -> str | None:
         async with await self.get_async_conn() as client:
             response = await client.describe_clusters(ClusterIdentifier=cluster_identifier)
             return response["Clusters"][0]["ClusterStatus"] if response else None
@@ -115,7 +115,7 @@ class RedshiftHook(AwsBaseHook):
         """
         final_cluster_snapshot_identifier = final_cluster_snapshot_identifier or ""
 
-        response = self.get_conn().delete_cluster(
+        response = self.conn.delete_cluster(
             ClusterIdentifier=cluster_identifier,
             SkipFinalClusterSnapshot=skip_final_cluster_snapshot,
             FinalClusterSnapshotIdentifier=final_cluster_snapshot_identifier,
@@ -131,7 +131,7 @@ class RedshiftHook(AwsBaseHook):
 
         :param cluster_identifier: unique identifier of a cluster
         """
-        response = self.get_conn().describe_cluster_snapshots(ClusterIdentifier=cluster_identifier)
+        response = self.conn.describe_cluster_snapshots(ClusterIdentifier=cluster_identifier)
         if "Snapshots" not in response:
             return None
         snapshots = response["Snapshots"]
@@ -139,7 +139,7 @@ class RedshiftHook(AwsBaseHook):
         snapshots.sort(key=lambda x: x["SnapshotCreateTime"], reverse=True)
         return snapshots
 
-    def restore_from_cluster_snapshot(self, cluster_identifier: str, snapshot_identifier: str) -> str:
+    def restore_from_cluster_snapshot(self, cluster_identifier: str, snapshot_identifier: str) -> dict | None:
         """
         Restore a cluster from its snapshot.
 
@@ -149,7 +149,7 @@ class RedshiftHook(AwsBaseHook):
         :param cluster_identifier: unique identifier of a cluster
         :param snapshot_identifier: unique identifier for a snapshot of a cluster
         """
-        response = self.get_conn().restore_from_cluster_snapshot(
+        response = self.conn.restore_from_cluster_snapshot(
             ClusterIdentifier=cluster_identifier, SnapshotIdentifier=snapshot_identifier
         )
         return response["Cluster"] if response["Cluster"] else None
@@ -160,7 +160,7 @@ class RedshiftHook(AwsBaseHook):
         cluster_identifier: str,
         retention_period: int = -1,
         tags: list[Any] | None = None,
-    ) -> str:
+    ) -> dict | None:
         """
         Create a snapshot of a cluster.
 
@@ -175,7 +175,7 @@ class RedshiftHook(AwsBaseHook):
         """
         if tags is None:
             tags = []
-        response = self.get_conn().create_cluster_snapshot(
+        response = self.conn.create_cluster_snapshot(
             SnapshotIdentifier=snapshot_identifier,
             ClusterIdentifier=cluster_identifier,
             ManualSnapshotRetentionPeriod=retention_period,
@@ -192,11 +192,11 @@ class RedshiftHook(AwsBaseHook):
         :param snapshot_identifier: A unique identifier for the snapshot that you are requesting
         """
         try:
-            response = self.get_conn().describe_cluster_snapshots(
+            response = self.conn.describe_cluster_snapshots(
                 SnapshotIdentifier=snapshot_identifier,
             )
             snapshot = response.get("Snapshots")[0]
             snapshot_status: str = snapshot.get("Status")
             return snapshot_status
-        except self.get_conn().exceptions.ClusterSnapshotNotFoundFault:
+        except self.conn.exceptions.ClusterSnapshotNotFoundFault:
             return None

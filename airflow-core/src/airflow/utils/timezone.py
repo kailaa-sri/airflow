@@ -29,7 +29,6 @@ from pendulum.datetime import DateTime
 if TYPE_CHECKING:
     from pendulum.tz.timezone import FixedTimezone, Timezone
 
-    from airflow.typing_compat import Literal
 
 _PENDULUM3 = version.parse(metadata.version("pendulum")).major == 3
 # UTC Timezone as a tzinfo instance. Actual value depends on pendulum version:
@@ -285,7 +284,7 @@ def parse_timezone(name: str | int) -> FixedTimezone | Timezone:
     """
     if _PENDULUM3:
         # This only presented in pendulum 3 and code do not reached into the pendulum 2
-        return pendulum.timezone(name)  # type: ignore[operator]
+        return pendulum.timezone(name)
     # In pendulum 2 this refers to the function, in pendulum 3 refers to the module
     return pendulum.tz.timezone(name)  # type: ignore[operator]
 
@@ -301,9 +300,7 @@ def local_timezone() -> FixedTimezone | Timezone:
     return pendulum.tz.local_timezone()
 
 
-def from_timestamp(
-    timestamp: int | float, tz: str | FixedTimezone | Timezone | Literal["local"] = utc
-) -> DateTime:
+def from_timestamp(timestamp: int | float, tz: str | FixedTimezone | Timezone = utc) -> DateTime:
     """
     Parse timestamp and return DateTime in a given time zone.
 

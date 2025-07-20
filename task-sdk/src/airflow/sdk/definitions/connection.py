@@ -24,7 +24,8 @@ from typing import Any
 
 import attrs
 
-from airflow.exceptions import AirflowException
+from airflow.exceptions import AirflowException, AirflowNotFoundException
+from airflow.sdk.exceptions import AirflowRuntimeError, ErrorType
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +57,71 @@ class Connection:
     port: int | None = None
     extra: str | None = None
 
-    def get_uri(self): ...
+    EXTRA_KEY = "__extra__"
+
+    def get_uri(self) -> str:
+        """Generate and return connection in URI format."""
+        from urllib.parse import parse_qsl, quote, urlencode
+
+        if self.conn_type and "_" in self.conn_type:
+            log.warning(
+                "Connection schemes (type: %s) shall not contain '_' according to RFC3986.",
+                self.conn_type,
+            )
+        if self.conn_type:
+            uri = f"{self.conn_type.lower().replace('_', '-')}://"
+        else:
+            uri = "//"
+        host_to_use: str | None
+        if self.host and "://" in self.host:
+            protocol, host = self.host.split("://", 1)
+            # If the protocol in host matches the connection type, don't add it again
+            if protocol == self.conn_type:
+                host_to_use = self.host
+                protocol_to_add = None
+            else:
+                # Different protocol, add it to the URI
+                host_to_use = host
+                protocol_to_add = protocol
+        else:
+            host_to_use = self.host
+            protocol_to_add = None
+
+        if protocol_to_add:
+            uri += f"{protocol_to_add}://"
+
+        authority_block = ""
+        if self.login is not None:
+            authority_block += quote(self.login, safe="")
+        if self.password is not None:
+            authority_block += ":" + quote(self.password, safe="")
+        if authority_block > "":
+            authority_block += "@"
+            uri += authority_block
+
+        host_block = ""
+        if host_to_use:
+            host_block += quote(host_to_use, safe="")
+        if self.port:
+            if host_block == "" and authority_block == "":
+                host_block += f"@:{self.port}"
+            else:
+                host_block += f":{self.port}"
+        if self.schema:
+            host_block += f"/{quote(self.schema, safe='')}"
+        uri += host_block
+
+        if self.extra:
+            try:
+                query: str | None = urlencode(self.extra_dejson)
+            except TypeError:
+                query = None
+            if query and self.extra_dejson == dict(parse_qsl(query, keep_blank_values=True)):
+                uri += ("?" if self.schema else "/?") + query
+            else:
+                uri += ("?" if self.schema else "/?") + urlencode({self.EXTRA_KEY: self.extra})
+
+        return uri
 
     def get_hook(self, *, hook_params=None):
         """Return hook based on conn_type."""
@@ -85,7 +150,12 @@ class Connection:
     def get(cls, conn_id: str) -> Any:
         from airflow.sdk.execution_time.context import _get_connection
 
-        return _get_connection(conn_id)
+        try:
+            return _get_connection(conn_id)
+        except AirflowRuntimeError as e:
+            if e.error.error == ErrorType.CONNECTION_NOT_FOUND:
+                raise AirflowNotFoundException(f"The conn_id `{conn_id}` isn't defined") from None
+            raise
 
     @property
     def extra_dejson(self) -> dict:

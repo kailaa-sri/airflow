@@ -35,7 +35,12 @@ from airflow.providers.google.cloud.triggers.cloud_storage_transfer_service impo
     CloudStorageTransferServiceCheckJobStatusTrigger,
 )
 from airflow.providers.google.common.hooks.base_google import PROVIDE_PROJECT_ID
-from airflow.sensors.base import BaseSensorOperator
+from airflow.providers.google.version_compat import AIRFLOW_V_3_0_PLUS
+
+if AIRFLOW_V_3_0_PLUS:
+    from airflow.sdk import BaseSensorOperator
+else:
+    from airflow.sensors.base import BaseSensorOperator  # type: ignore[no-redef]
 
 if TYPE_CHECKING:
     from airflow.utils.context import Context
@@ -98,6 +103,7 @@ class CloudDataTransferServiceJobStatusSensor(BaseSensorOperator):
         self.deferrable = deferrable
 
     def poke(self, context: Context) -> bool:
+        ti = context["ti"]
         hook = CloudDataTransferServiceHook(
             gcp_conn_id=self.gcp_cloud_conn_id,
             impersonation_chain=self.impersonation_chain,
@@ -113,13 +119,12 @@ class CloudDataTransferServiceJobStatusSensor(BaseSensorOperator):
             operations=operations, expected_statuses=self.expected_statuses
         )
         if check:
-            self.xcom_push(key="sensed_operations", value=operations, context=context)
+            ti.xcom_push(key="sensed_operations", value=operations)
 
         project_id = self.project_id or hook.project_id
         if project_id:
             CloudStorageTransferJobLink.persist(
                 context=context,
-                task_instance=self,
                 project_id=project_id,
                 job_name=self.job_name,
             )
@@ -154,4 +159,5 @@ class CloudDataTransferServiceJobStatusSensor(BaseSensorOperator):
         if event["status"] == "error":
             raise AirflowException(event["message"])
 
-        self.xcom_push(key="sensed_operations", value=event["operations"], context=context)
+        ti = context["ti"]
+        ti.xcom_push(key="sensed_operations", value=event["operations"])

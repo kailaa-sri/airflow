@@ -58,7 +58,7 @@ if TYPE_CHECKING:
     from google.cloud.storage_transfer_v1.services.storage_transfer_service.pagers import (
         ListTransferJobsAsyncPager,
     )
-    from google.longrunning import operations_pb2  # type: ignore[attr-defined]
+    from google.longrunning import operations_pb2
     from proto import Message
 
 log = logging.getLogger(__name__)
@@ -218,7 +218,7 @@ class CloudDataTransferServiceHook(GoogleBaseHook):
                     return (
                         self.get_conn().transferJobs().create(body=body).execute(num_retries=self.num_retries)
                     )
-                elif transfer_job.get(STATUS) == GcpTransferJobsStatus.DISABLED:
+                if transfer_job.get(STATUS) == GcpTransferJobsStatus.DISABLED:
                     return self.enable_transfer_job(job_name=job_name, project_id=body.get(PROJECT_ID))
             else:
                 raise e

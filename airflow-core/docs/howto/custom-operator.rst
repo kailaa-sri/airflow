@@ -24,7 +24,7 @@ Creating a custom Operator
 Airflow allows you to create new operators to suit the requirements of you or your team.
 This extensibility is one of the many features which make Apache Airflow powerful.
 
-You can create any operator you want by extending the :class:`airflow.models.baseoperator.BaseOperator`
+You can create any operator you want by extending the public SDK base class :class:`~airflow.sdk.BaseOperator`.
 
 There are two methods that you need to override in a derived class:
 
@@ -44,7 +44,7 @@ Let's implement an example ``HelloOperator`` in a new file ``hello_operator.py``
 
 .. code-block:: python
 
-        from airflow.models.baseoperator import BaseOperator
+        from airflow.sdk import BaseOperator
 
 
         class HelloOperator(BaseOperator):
