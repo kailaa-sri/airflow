@@ -25,6 +25,7 @@ import datetime
 import enum
 import itertools
 import logging
+import math
 import weakref
 from collections.abc import Collection, Generator, Iterable, Iterator, Mapping, Sequence
 from functools import cache, cached_property
@@ -40,6 +41,7 @@ from dateutil import relativedelta
 from pendulum.tz.timezone import FixedTimezone, Timezone
 
 from airflow import macros
+from airflow._shared.timezones.timezone import from_timestamp, parse_timezone
 from airflow.callbacks.callback_requests import DagCallbackRequest, TaskCallbackRequest
 from airflow.exceptions import AirflowException, SerializationError, TaskDeferred
 from airflow.models.connection import Connection
@@ -94,7 +96,6 @@ from airflow.utils.docs import get_docs_url
 from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.module_loading import import_string, qualname
 from airflow.utils.operator_resources import Resources
-from airflow.utils.timezone import from_timestamp, parse_timezone
 from airflow.utils.types import NOTSET, ArgNotSet
 
 if TYPE_CHECKING:
@@ -720,6 +721,9 @@ class BaseSerialization:
             # enum.IntEnum is an int instance, it causes json dumps error so we use its value.
             if isinstance(var, enum.Enum):
                 return var.value
+            # These are not allowed in JSON. https://datatracker.ietf.org/doc/html/rfc8259#section-6
+            if isinstance(var, float) and (math.isnan(var) or math.isinf(var)):
+                return str(var)
             return var
         elif isinstance(var, dict):
             return cls._encode(
